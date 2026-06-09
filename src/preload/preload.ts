@@ -35,6 +35,8 @@ export interface ElectronAPI {
   getInventory: () => Promise<InventoryPayload>;
   captureScreenshot: () => Promise<{ path: string; name: string } | null>;
   openFileDialog: () => Promise<{ path: string; name: string } | null>;
+  listSessions: () => Promise<any[]>;
+  getSession: (sessionId: string) => Promise<any[]>;
 
   // One-way sends
   setProviderAndModel: (provider: string, model: string) => void;
@@ -73,6 +75,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getInventory: () => ipcRenderer.invoke('get-inventory'),
   captureScreenshot: () => ipcRenderer.invoke('capture-screenshot'),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
+  listSessions: () => ipcRenderer.invoke('list-sessions'),
+  getSession: (sessionId: string) => ipcRenderer.invoke('get-session', sessionId),
 
   // ── One-way sends ──
   setProviderAndModel: (provider: string, model: string) => ipcRenderer.send('set-provider-model', provider, model),

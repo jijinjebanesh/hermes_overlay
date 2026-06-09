@@ -57,9 +57,9 @@ export const Conversation: React.FC = () => {
     setShowNewMsg(false);
   };
 
-  // ── Empty state: zero height ──
+  // ── Empty state: push input bar to bottom ──
   if (messages.length === 0) {
-    return null;
+    return <div className="conversation" />;
   }
 
   return (

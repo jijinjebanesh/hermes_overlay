@@ -1,5 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { Header } from '../components/Header';
 import { Conversation } from '../components/Conversation';
 import { InputBar } from '../components/InputBar';
@@ -18,8 +17,9 @@ import type { StreamSegment } from '../store/overlayStore';
 const api = (window as any).electronAPI as any;
 
 export const App: React.FC = () => {
-  const [isVisible, setIsVisible] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
 
   const {
     addMessage,
@@ -33,6 +33,8 @@ export const App: React.FC = () => {
     theme,
     fontFamily
   } = useOverlayStore();
+
+  const [isVisible, setIsVisible] = useState(true);
 
   // ── Theme & Font Engine ──
   useEffect(() => {
@@ -49,32 +51,29 @@ export const App: React.FC = () => {
     };
 
     if (safeTheme === 'system') {
-      const matchMedia = window.matchMedia('(prefers-color-scheme: dark)');
-      applyTheme(matchMedia.matches);
-      
-      const listener = (e: MediaQueryListEvent) => applyTheme(e.matches);
-      matchMedia.addEventListener('change', listener);
-      return () => matchMedia.removeEventListener('change', listener);
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      applyTheme(mq.matches);
+      const handler = (e: MediaQueryListEvent) => applyTheme(e.matches);
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
     } else {
       applyTheme(safeTheme === 'dark');
     }
   }, [theme, fontFamily]);
 
+  // ── Focus helper ──
   const focusInput = useCallback(() => {
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }, []);
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }, [inputRef]);
 
-  // ── Load inventory on mount ──
+  // ── Inventory fetch ──
   useEffect(() => {
     if (!api?.getInventory) return;
-
     setInventoryLoading(true);
     api.getInventory()
       .then((payload: any) => {
-        if (payload && payload.providers) {
+        if (payload?.providers) {
           setInventory(payload.providers);
-
-          // If no model/provider set yet, use the current from hermes config
           const state = useOverlayStore.getState();
           if (!state.activeProvider && payload.provider) {
             setActiveProvider(payload.provider);
@@ -94,7 +93,7 @@ export const App: React.FC = () => {
 
     const cleanups: (() => void)[] = [];
 
-    // Visibility changes
+    // Visibility changes — sync state and focus
     if (api.onVisibilityChange) {
       cleanups.push(api.onVisibilityChange((visible: boolean) => {
         setIsVisible(visible);
@@ -155,30 +154,100 @@ export const App: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(interval);
-  });
+  }, []);
+
+  // ── Prevent Electron from navigating on file drop (document-level) ──
+  useEffect(() => {
+    const preventNav = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    document.addEventListener('dragover', preventNav);
+    document.addEventListener('drop', preventNav);
+    return () => {
+      document.removeEventListener('dragover', preventNav);
+      document.removeEventListener('drop', preventNav);
+    };
+  }, []);
+
+  // ── Drag & Drop Handlers (Global) ──
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current -= 1;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+
+    // Windows drag-and-drop often has empty file.type — fall back to extension
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const supportedExts = [
+      // Images
+      'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico',
+      // Documents
+      'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'rtf',
+      // Text / Code
+      'txt', 'md', 'csv', 'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'log',
+      'js', 'ts', 'tsx', 'jsx', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp',
+      'cs', 'swift', 'kt', 'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
+      'html', 'css', 'scss', 'less', 'sql', 'graphql',
+    ];
+    const isSupported = supportedExts.includes(ext) || file.type !== '';
+
+    if (isSupported) {
+      const filePath = (file as any).path || '';
+      useOverlayStore.getState().setFileAttached({ path: filePath, name: file.name });
+    }
+  };
+
+  const showDragOverlay = isDragging;
 
   return (
     <>
-      <AnimatePresence>
-        {isVisible && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{
-              type: 'spring',
-              mass: 0.6,
-              stiffness: 280,
-              opacity: { duration: 0.2, ease: 'easeOut' },
-            }}
-            className="overlay-shell"
-          >
-            <Header />
-            <Conversation />
-            <InputBar inputRef={inputRef} />
-          </motion.div>
+      <div 
+        className={`overlay-shell ${useOverlayStore().smallWindow ? 'small-mode' : ''} ${!isVisible ? 'hidden' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {showDragOverlay && (
+          <div className="global-drag-overlay">
+            <div className="global-drag-content">
+              <div className="global-drag-icon">📁</div>
+              <h2>Drop file to attach</h2>
+              <p>Images, documents, code, and more</p>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
+        <Header />
+        <Conversation />
+        <InputBar inputRef={inputRef} />
+      </div>
       <SettingsModal />
     </>
   );

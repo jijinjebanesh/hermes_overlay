@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Hermes Overlay F9 Global Hotkey Daemon
-Listens for F9 key press and launches/toggles the overlay
-"""
+"""\nHermes Overlay F9 Global Hotkey Daemon\nListens for F9 key press and launches/toggles the overlay\nNow properly handles window focusing for already-running Electron instances.\n"""
 
 import os
 import sys
@@ -10,6 +7,16 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+
+try:
+    import pygetwindow as gw
+    import pyautogui
+    PYGETWINDOW_AVAILABLE = True
+except ImportError:
+    PYGETWINDOW_AVAILABLE = False
+    print("WARNING: pygetwindow not installed. Window focusing will be limited.")
+    print("Install with: pip install pygetwindow pyautogui")
+    print("")
 
 try:
     from pynput import keyboard
@@ -20,11 +27,45 @@ except ImportError:
     print("  pip install pynput")
     print("  python -m pip install pynput")
     print("")
-    print("Alternatively, use the AutoHotkey script (f9-hotkey.ahk):")
-    print("  1. Install AutoHotkey v2.0+ from https://www.autohotkey.com/")
-    print("  2. Double-click f9-hotkey.ahk to run the hotkey listener")
-    print("")
+    if not PYGETWINDOW_AVAILABLE:
+        print("Alternatively, use the AutoHotkey script (f9-hotkey.ahk):")
+        print("  1. Install AutoHotkey v2.0+ from https://www.autohotkey.com/")
+        print("  2. Double-click f9-hotkey.ahk to run the hotkey listener")
+        print("")
     sys.exit(1)
+
+
+def focus_existing_window():
+    """Find and focus an existing Hermes Electron window if it exists"""
+    if not PYGETWINDOW_AVAILABLE:
+        return False
+    
+    try:
+        # Look for Electron windows with "Hermes" in the title
+        windows = gw.getWindowsWithTitle('Hermes')
+        if windows:
+            win = windows[0]
+            if win.isMinimized:
+                win.restore()
+            if not win.isActive:
+                win.activate()
+            print("[✓] Focused existing Hermes window")
+            return True
+        
+        # Also check for any Electron window (in case title changed)
+        all_electron = [w for w in gw.getAllWindows() if w.title and 'electron' in w.title.lower()]
+        if all_electron:
+            # Activate the most recently used one
+            win = all_electron[-1]
+            if win.isMinimized:
+                win.restore()
+            win.activate()
+            print("[✓] Focused Electron window (Hermes)")
+            return True
+    except Exception as e:
+        print(f"[!] Window focus failed: {e}")
+    
+    return False
 
 
 class HermesHotkey:
@@ -37,25 +78,26 @@ class HermesHotkey:
     def launch_overlay(self):
         """Launch or focus the Hermes overlay"""
         with self.lock:
-            if self.overlay_process is None or self.overlay_process.poll() is not None:
-                print("[F9] Launching Hermes Overlay...")
-                try:
-                    # Launch the dev server + Electron app
-                    env = os.environ.copy()
-                    env['NODE_ENV'] = 'development'
+            # First try to focus an existing window
+            if focus_existing_window():
+                return
+            
+            print("[F9] Launching Hermes Overlay...")
+            try:
+                # Launch the dev server + Electron app
+                env = os.environ.copy()
+                env['NODE_ENV'] = 'development'
 
-                    self.overlay_process = subprocess.Popen(
-                        ['npm', 'run', 'dev'],
-                        cwd=str(self.overlay_dir),
-                        env=env,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                    )
-                    print("[✓] Hermes Overlay started (PID: {})".format(self.overlay_process.pid))
-                except Exception as e:
-                    print(f"[✗] Failed to launch overlay: {e}")
-            else:
-                print("[✓] Hermes Overlay already running")
+                self.overlay_process = subprocess.Popen(
+                    ['npm', 'run', 'dev'],
+                    cwd=str(self.overlay_dir),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                print("[✓] Hermes Overlay started (PID: {})".format(self.overlay_process.pid))
+            except Exception as e:
+                print(f"[✗] Failed to launch overlay: {e}")
 
     def on_press(self, key):
         """Handle key press events"""

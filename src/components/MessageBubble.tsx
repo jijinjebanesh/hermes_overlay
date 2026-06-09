@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Message, ToolCall, StreamSegment } from '../store/overlayStore';
-import { ChevronRight, ChevronDown, Terminal, PenLine, Search, Globe, Zap, FileText, Cpu } from 'lucide-react';
+import { ChevronRight, ChevronDown, Terminal, PenLine, Search, Globe, Zap, FileText, Cpu, Paperclip } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -13,6 +13,10 @@ interface MessageBubbleProps {
 
 const CodeBlock: React.FC<{ code: string; language?: string }> = ({ code, language }) => {
   const [copied, setCopied] = useState(false);
+  
+  // Default collapse terminal output
+  const isTerminal = language === 'bash' || language === 'shell' || language === 'sh' || language === 'terminal';
+  const [expanded, setExpanded] = useState(!isTerminal);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code).then(() => {
@@ -50,6 +54,40 @@ const CodeBlock: React.FC<{ code: string; language?: string }> = ({ code, langua
       return <div key={i} dangerouslySetInnerHTML={{ __html: html || ' ' }} />;
     });
   };
+
+  if (isTerminal) {
+    return (
+      <div className="diff-block">
+        <button
+          className="diff-block-header"
+          onClick={() => setExpanded(!expanded)}
+          style={{ justifyContent: 'flex-start' }}
+        >
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <Terminal size={12} />
+          <span className="diff-block-title" style={{ marginLeft: 6 }}>
+            {expanded ? '🔧 Terminal output' : '🔧 Ran terminal command — click to expand'}
+          </span>
+        </button>
+        {expanded && (
+          <div className="code-block" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTop: 'none', margin: 0 }}>
+            <div className="code-block-header">
+              {language && <span className="code-block-lang">{language}</span>}
+              <button
+                className={`code-copy-btn${copied ? ' copied' : ''}`}
+                onClick={handleCopy}
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <div className="code-block-content selectable">
+              {highlight(code)}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="code-block">
@@ -235,6 +273,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     return (
       <div className="message-user-row message-row">
         <div className="message-user-bubble selectable">
+          {message.attachedFile && (
+            <div className="message-attached-file">
+              <div className="message-attached-file-icon">
+                <Paperclip size={16} />
+              </div>
+              <div className="message-attached-file-info">
+                <span className="message-attached-file-name">{message.attachedFile.name}</span>
+                <span className="message-attached-file-type">{message.attachedFile.name.split('.').pop()?.toUpperCase() || 'File'}</span>
+              </div>
+            </div>
+          )}
           {message.content}
         </div>
         <div className="message-timestamp">

@@ -22,7 +22,9 @@ import { spawn, execSync, ChildProcess } from 'child_process';
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isVisible = false;
+let isQuitting = false;
 let activeChild: ChildProcess | null = null;
+let hideTimeout: NodeJS.Timeout | null = null;
 
 const hermesDir = path.join(os.homedir(), '.hermes');
 const overlayConfigPath = path.join(hermesDir, 'overlay.json');
@@ -137,6 +139,7 @@ function createWindow() {
     frame: false,
     alwaysOnTop: savedBounds?.alwaysOnTop ?? true,
     transparent: true,
+    backgroundColor: '#00000000',
     opacity: savedBounds?.opacity ?? 0.96,
     hasShadow: true,
     thickFrame: false,
@@ -157,6 +160,28 @@ function createWindow() {
     const y = workArea.y + workArea.height - MAX_HEIGHT - 24;
     mainWindow.setBounds({ x, y, width: WIDTH, height: MAX_HEIGHT });
   }
+
+  // Prevent window from being destroyed on close — hide it instead
+  // This is critical: without this, clicking X or OS-level close destroys the
+  // BrowserWindow, and subsequent show() calls fail silently.
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      mainWindow?.webContents.send('visibility-change', false);
+      isVisible = false;
+      
+      if (hideTimeout) clearTimeout(hideTimeout);
+      hideTimeout = setTimeout(() => {
+        if (!isVisible && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.hide();
+        }
+      }, 200);
+    }
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 
   mainWindow.on('moved', () => {
     if (mainWindow) saveOverlayConfig({ bounds: mainWindow.getBounds() });
@@ -195,7 +220,7 @@ function createTray() {
    ═══════════════════════════════════════════════ */
 
 function toggleVisibility() {
-  if (!mainWindow) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
 
   if (isVisible) {
     if (!mainWindow.isFocused()) {
@@ -203,11 +228,16 @@ function toggleVisibility() {
       return;
     }
     mainWindow.webContents.send('visibility-change', false);
-    setTimeout(() => {
-      mainWindow?.hide();
-      isVisible = false;
-    }, 150);
+    isVisible = false;
+    
+    if (hideTimeout) clearTimeout(hideTimeout);
+    hideTimeout = setTimeout(() => {
+      if (!isVisible && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.hide();
+      }
+    }, 200);
   } else {
+    if (hideTimeout) clearTimeout(hideTimeout);
     mainWindow.show();
     mainWindow.webContents.send('visibility-change', true);
     isVisible = true;
@@ -377,7 +407,13 @@ app.whenReady().then(() => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: [
-        { name: 'Supported Files', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+        { name: 'All Supported', extensions: [
+          'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg',
+          'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'rtf',
+          'txt', 'md', 'csv', 'json', 'xml', 'yaml', 'yml', 'toml', 'log',
+          'js', 'ts', 'tsx', 'jsx', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'h',
+          'cs', 'swift', 'kt', 'sh', 'ps1', 'bat', 'html', 'css', 'sql',
+        ] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });
@@ -522,10 +558,20 @@ app.whenReady().then(() => {
     if (data.toolMode === 'none') args.push('-t', '');
     else if (data.toolMode === 'terminal') args.push('-t', 'terminal');
 
-    if (data.file) args.push('--image', data.file);
+    let queryText = data.text;
+    if (data.file) {
+      const ext = data.file.split('.').pop()?.toLowerCase() || '';
+      const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+      
+      if (imageExts.includes(ext)) {
+        args.push('--image', data.file);
+      } else {
+        queryText = `[User attached a file at: ${data.file}]\n\n` + queryText;
+      }
+    }
 
     // The query
-    args.push('-q', data.text);
+    args.push('-q', queryText);
 
     // Auto-approve hooks for non-interactive use
     args.push('--accept-hooks');
@@ -611,7 +657,9 @@ app.whenReady().then(() => {
               trimmed.startsWith('Session:') ||
               trimmed.startsWith('Duration:') ||
               trimmed.startsWith('Messages:') ||
-              trimmed.startsWith('Exit code:')
+              trimmed.startsWith('Exit code:') ||
+              trimmed.startsWith('↻') ||
+              trimmed.match(/Resumed session/)
             ) {
               unparsed = fullOutput.substring(parsedIndex);
               lineEnd = unparsed.indexOf('\n');
@@ -693,6 +741,10 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
 });
 
 app.on('window-all-closed', () => {

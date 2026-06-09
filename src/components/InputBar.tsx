@@ -32,11 +32,10 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     addMessage, addToHistory, inputHistory,
     clearSession, newSession, undo, localMode,
     sessionId, setStreamState, updateLastMessage,
+    fileAttached, setFileAttached
   } = useOverlayStore();
 
   const [input, setInput] = useState('');
-  const [isDragging, setIsDragging] = useState(false);
-  const [fileAttached, setFileAttached] = useState<{path: string; name: string} | null>(null);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [rejectTooltip, setRejectTooltip] = useState<string | null>(null);
   const rejectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,13 +125,13 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
 
     // ── Submit / Newline ──
     if (e.key === 'Enter') {
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const isNewline = isMac ? e.shiftKey : e.ctrlKey;
-
-      if (!isNewline) {
-        e.preventDefault();
-        handleSubmit();
+      if (e.shiftKey) {
+        // Shift+Enter = newline (let it happen naturally)
+        return;
       }
+
+      e.preventDefault();
+      handleSubmit();
     }
   };
 
@@ -276,7 +275,8 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     addMessage({
       id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
       role: 'user',
-      content: trimmed + (fileAttached ? `\n[Attached: ${fileAttached.name}]` : ''),
+      content: trimmed,
+      attachedFile: fileAttached ? { name: fileAttached.name, path: fileAttached.path } : undefined,
       timestamp: Date.now(),
     });
 
@@ -327,30 +327,6 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     }));
   };
 
-
-  /* ── DRAG & DROP ── */
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => setIsDragging(false);
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-
-    const isPdfOrImage = file.type === 'application/pdf' || file.type.startsWith('image/');
-    if (isPdfOrImage) {
-      setFileAttached({ path: (file as any).path, name: file.name });
-    } else {
-      showReject(`Unsupported: ${file.name.split('.').pop() || 'file'}`);
-    }
-  };
 
   const showReject = (msg: string) => {
     setRejectTooltip(msg);
@@ -404,21 +380,18 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
   const hasContent = input.trim().length > 0 || fileAttached !== null;
 
   return (
-    <div
-      className={`input-bar${isDragging ? ' dragging' : ''}`}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {/* File chip */}
-      {fileAttached && (
-        <div className="file-chip">
-          <span className="file-chip-name">{fileAttached.name}</span>
-          <button className="file-chip-close" onClick={() => setFileAttached(null)}>
-            <X size={12} />
-          </button>
-        </div>
-      )}
+    <div className="input-bar">
+      {/* File chips container (absolute positioned above input bar) */}
+      <div className="file-chips-container">
+        {fileAttached && (
+          <div className="file-chip">
+            <span className="file-chip-name">{fileAttached.name}</span>
+            <button className="file-chip-close" onClick={() => setFileAttached(null)}>
+              <X size={12} />
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Rejection tooltip */}
       {rejectTooltip && (

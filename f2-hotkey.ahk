@@ -17,7 +17,7 @@ DetectHiddenWindows(true)
 SetTitleMatchMode(3) ; Exact title match
 
 #HotIf !WinExist(overlayTitle)
-^+h:: {
+f3:: {
     global overlayDir
 
     ; Window doesn't exist yet — launch the overlay
@@ -33,7 +33,7 @@ SetTitleMatchMode(3) ; Exact title match
 #HotIf
 
 ; Hard kill switch: Ctrl+Alt+Shift+F2
-^!+h:: {
+^!+f3:: {
     ToolTip("🛑 Force Closing Hermes...", 10, 10)
     SetTimer(() => ToolTip(), 1000)
     try {
@@ -41,5 +41,5 @@ SetTitleMatchMode(3) ; Exact title match
     }
 }
 
-ToolTip("Ctrl+Shift+H Daemon Active — Press Ctrl+Shift+H to toggle Hermes", 10, 10)
+ToolTip("F3 Daemon Active — Press F3 to toggle Hermes", 10, 10)
 SetTimer(() => ToolTip(), 3000)

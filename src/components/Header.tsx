@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquarePlus, X, ChevronDown, Check, Zap, Search, Loader2, Settings, TerminalSquare } from 'lucide-react';
+import { MessageSquarePlus, X, ChevronDown, Check, Zap, Search, Loader2, Settings, TerminalSquare, Clock } from 'lucide-react';
 import { useOverlayStore } from '../store/overlayStore';
 import type { InventoryProvider } from '../store/overlayStore';
 
@@ -24,14 +24,18 @@ export const Header: React.FC = () => {
     inventory, inventoryLoading,
     newSession,
     setInventory, setInventoryLoading,
-    setSettingsOpen,
+    setSettingsOpen, hydrateSession,
   } = useOverlayStore();
 
   const [showPopover, setShowPopover] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [sessionsList, setSessionsList] = useState<any[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
   const [popoverView, setPopoverView] = useState<'providers' | 'models'>('providers');
   const [selectedProvider, setSelectedProvider] = useState<string>(activeProvider);
   const [searchQuery, setSearchQuery] = useState('');
   const popoverRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Close popover on outside click
@@ -48,6 +52,18 @@ export const Header: React.FC = () => {
     return () => document.removeEventListener('mousedown', handler);
   }, [showPopover]);
 
+  // Close history on outside click
+  useEffect(() => {
+    if (!showHistory) return;
+    const handler = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setShowHistory(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showHistory]);
+
   const handleClose = () => api?.closeOverlay();
 
   const handleNewChat = () => newSession();
@@ -56,6 +72,38 @@ export const Header: React.FC = () => {
   
   const handleTerminal = () => {
     if (api?.openTerminal) api.openTerminal();
+  };
+
+  const handleToggleHistory = () => {
+    if (showHistory) {
+      setShowHistory(false);
+    } else {
+      setShowHistory(true);
+      setShowPopover(false);
+      setSessionsLoading(true);
+      if (api?.listSessions) {
+        api.listSessions().then((data: any[]) => {
+          setSessionsList(data);
+          setSessionsLoading(false);
+        }).catch(() => setSessionsLoading(false));
+      } else {
+        setSessionsLoading(false);
+      }
+    }
+  };
+
+  const handleSelectSession = async (sessionId: string) => {
+    if (!api?.getSession) return;
+    setSessionsLoading(true);
+    try {
+      const messages = await api.getSession(sessionId);
+      hydrateSession(sessionId, messages);
+      setShowHistory(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSessionsLoading(false);
+    }
   };
 
   const handleRefreshInventory = () => {
@@ -76,6 +124,7 @@ export const Header: React.FC = () => {
       setSearchQuery('');
     } else {
       setShowPopover(true);
+      setShowHistory(false);
       setPopoverView('providers');
       setSelectedProvider(activeProvider);
       setSearchQuery('');
@@ -288,8 +337,54 @@ export const Header: React.FC = () => {
       {/* CENTER: Spacer */}
       <div className="header-spacer" />
 
-      {/* RIGHT: Terminal + Settings + New Chat + Close */}
+      {/* RIGHT: History + Terminal + Settings + New Chat + Close */}
       <div className="header-actions">
+        <div ref={historyRef} style={{ position: 'relative' }}>
+          <button
+            className={`header-btn ${showHistory ? 'active' : ''}`}
+            onClick={handleToggleHistory}
+            title="History"
+            aria-label="View past sessions"
+          >
+            <Clock size={14} />
+          </button>
+          
+          {showHistory && (
+            <div className="model-popover" style={{ right: -128, left: 'auto', top: 32, width: 280 }} role="listbox">
+              <div className="popover-section-label">
+                <Clock size={10} />
+                <span>Recent Sessions</span>
+              </div>
+              <div className="model-list-scroll">
+                {sessionsLoading && sessionsList.length === 0 ? (
+                  <div className="popover-empty">
+                    <Loader2 size={14} className="spin" style={{ display: 'inline-block', marginRight: 6 }} />
+                    Loading sessions...
+                  </div>
+                ) : sessionsList.length === 0 ? (
+                  <div className="popover-empty">No recent sessions found.</div>
+                ) : (
+                  sessionsList.map((s) => (
+                    <button
+                      key={s.id}
+                      className="model-popover-item model-item"
+                      onClick={() => handleSelectSession(s.id)}
+                      role="option"
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
+                        <span className="model-item-name" style={{ fontWeight: 500 }}>{s.title}</span>
+                        <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+                          {new Date(s.started_at).toLocaleString()} · {s.message_count} msg
+                        </span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        
         <button
           className="header-btn"
           onClick={handleTerminal}

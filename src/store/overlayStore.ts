@@ -23,6 +23,11 @@ export interface StreamSegment {
   status?: string;
 }
 
+export interface AttachedFile {
+  name: string;
+  path: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -33,6 +38,7 @@ export interface Message {
   toolCalls?: ToolCall[];
   /** Structured segments from hermes output (tool activity, diffs, thinking, text) */
   segments?: StreamSegment[];
+  attachedFile?: AttachedFile;
 }
 
 export interface StreamState {
@@ -72,6 +78,7 @@ interface OverlayState {
   toolMode: ToolMode;
   inputHistory: string[];
   historyIndex: number;
+  fileAttached: AttachedFile | null;
 
   // Config
   localMode: boolean;
@@ -108,6 +115,7 @@ interface OverlayState {
   appendSegmentToLast: (segment: StreamSegment) => void;
   clearSession: () => void;
   newSession: () => void;
+  hydrateSession: (sessionId: string, messages: Message[]) => void;
   setStreamState: (state: Partial<StreamState>) => void;
   cycleToolMode: () => void;
   setLocalMode: (enabled: boolean) => void;
@@ -117,6 +125,7 @@ interface OverlayState {
   setInventoryLoading: (loading: boolean) => void;
   addToHistory: (input: string) => void;
   undo: (turns: number) => void;
+  setFileAttached: (file: AttachedFile | null) => void;
 }
 
 
@@ -148,6 +157,7 @@ export const useOverlayStore = create<OverlayState>()(
       toolMode: 'all' as ToolMode,
       inputHistory: [],
       historyIndex: -1,
+      fileAttached: null,
 
       localMode: false,
       activeModel: '',
@@ -230,6 +240,9 @@ export const useOverlayStore = create<OverlayState>()(
       newSession: () =>
         set({ messages: [], sessionId: generateId() }),
 
+      hydrateSession: (sessionId, messages) =>
+        set({ sessionId, messages }),
+
       setStreamState: (newState) =>
         set((state) => ({
           streamState: { ...state.streamState, ...newState },
@@ -266,6 +279,8 @@ export const useOverlayStore = create<OverlayState>()(
             ),
           };
         }),
+
+      setFileAttached: (file) => set({ fileAttached: file }),
     }),
     {
       name: 'hermes-overlay-storage',
