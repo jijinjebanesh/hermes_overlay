@@ -1,0 +1,67 @@
+✅ HERMES OVERLAY 2.0 - READY TO LAUNCH
+
+F9 Hotkey Status:
+═══════════════════════════════════════════════════════════════
+
+✓ F9 hotkey script updated: f9-hotkey.ahk
+  - Now kills old overlay instances on startup
+  - Launches new overlay with all visual changes
+  - Displays status tooltips
+  - Close with: Ctrl+Alt+Shift+F9
+
+✓ Launcher created: launch.bat
+  - Checks dependencies
+  - Builds if needed
+  - Runs npm run dev
+  - Compatible with AutoHotkey F9 script
+
+✓ New overlay build verified:
+  - dist/main/main.js: 2.1K ✓
+  - dist/renderer/assets/index-*.css: 55K ✓ (Tailwind full design system)
+  - dist/renderer/assets/index-*.js: 291K ✓
+  - dist/preload/preload.js: 382 bytes ✓
+
+✓ Visual changes compiled in:
+  - Obsidian background (#0a0a0f)
+  - Cyan glows (#00ffe1)
+  - Glassmorphism (24px backdrop blur)
+  - 5 independent zones
+  - Mesh background animation
+  - All 8 color skins available
+
+═══════════════════════════════════════════════════════════════
+
+🚀 TO USE THE NEW OVERLAY:
+
+1. Close the AutoHotkey F9 script if running
+2. Open the updated f9-hotkey.ahk
+3. Press F9 anywhere
+
+   OR manually run:
+   C:\Users\jijin\hermes-overlay\launch.bat
+
+═══════════════════════════════════════════════════════════════
+
+⌨️ Keyboard Shortcuts:
+
+  F9                  = Launch/focus overlay
+  Ctrl+Alt+H          = Toggle overlay (while app running)
+  Ctrl+Alt+Shift+F9   = Close overlay
+  Ctrl+K              = Expand input to Monaco editor
+  Ctrl+P              = Command palette
+  Escape              = Close/clear
+
+═══════════════════════════════════════════════════════════════
+
+❌ OLD OVERLAY:
+
+The old overlay will be killed automatically when F9 is pressed.
+If you still see the old UI, it means:
+
+1. F9 script needs to be restarted (close and reopen f9-hotkey.ahk)
+2. Old Electron processes may still be running (killed on next F9 press)
+3. The new overlay will take ~4 seconds to start
+
+═══════════════════════════════════════════════════════════════
+
+Questions? Check: C:\Users\jijin\hermes-overlay\READY_TO_LAUNCH.md
