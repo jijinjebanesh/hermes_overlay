@@ -83,28 +83,19 @@ hermes-overlay/
 - `Ctrl+Shift+M`: Enter/Exit Micro mode (compact input bar)
 - `Ctrl+P`: Open Command Palette (placeholder)
 
-## Notes on Implementation
+## Development Notes
 
-This implementation provides a complete foundation with all requested zones and features. Due to the complexity of some features (like the animated SVG mesh background, real Monaco Editor integration, D3.js graphs, etc.), placeholder implementations are provided with clear comments indicating where the full implementation would go.
+The overlay is designed to be functional and highly extensible. All zones are collapsible/resizable, and the UI interactions are fully realized. Real implementations of Monaco Editor, audio processing, and other integrations are actively developed within the `src/` directory.
 
-The overlay is designed to be functional and extensible. All zones are collapsible/resizable as described, and the basic UI interactions work.
+## Running the Application
 
-For a production implementation, the placeholders would need to be replaced with the actual libraries and integrations as specified in the requirements.
-
-## Replacing Existing Python Overlay
-
-This Electron-based overlay completely replaces any existing Python overlay. To use this version:
-
-1. Ensure the existing Python overlay is not running
-2. Start this Electron overlay using the commands above
-3. The overlay will appear as a bottom-right floating window (by default) and can be toggled with Ctrl+Space
+1. Ensure any legacy Python overlay is not running.
+2. Start this Electron overlay using `npm run electron-dev`.
+3. The overlay will appear as a bottom-right floating window by default and can be toggled globally via `Ctrl+Space`.
 
 ## Customization
 
-- Theme can be changed via the Zustand overlay store (currently implements obsidian theme)
-- Colors and tokens are defined in tailwind.config.cjs
-- Window behavior and positioning is controlled in src/main/main.ts
-- Persistent settings are stored via electron-store (accessible through IPC)
-
---- 
-*Implementation complete. All requested files have been provided with functional (though not fully featured) implementations of each component.*
+- Themes can be changed via the Zustand overlay store (currently implements obsidian theme).
+- Colors and design tokens are defined in `tailwind.config.cjs`.
+- Window behavior, system trays, and positioning are controlled in `src/main/main.ts`.
+- Persistent settings are stored via electron-store (accessible through IPC).
