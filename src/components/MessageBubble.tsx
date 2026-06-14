@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Message, ToolCall, StreamSegment } from '../store/overlayStore';
 import { ChevronRight, ChevronDown, Terminal, PenLine, Search, Globe, Zap, FileText, Cpu, Paperclip } from 'lucide-react';
+import { AttachmentChip } from './AttachmentChip';
 
 interface MessageBubbleProps {
   message: Message;
@@ -208,6 +209,34 @@ const ThinkingBlock: React.FC<{ content: string }> = ({ content }) => {
 const ToolCallBlock: React.FC<{ tool: ToolCall }> = ({ tool }) => {
   const [expanded, setExpanded] = useState(false);
 
+  // Parse tool.command if it's a JSON string (from older Hermes versions)
+  let displayCommand = tool.command || '';
+  try {
+    if (displayCommand.startsWith('{') && displayCommand.endsWith('}')) {
+      const parsed = JSON.parse(displayCommand);
+      // For terminal: extract the actual command
+      if (tool.name === 'terminal' && parsed.command) {
+        displayCommand = parsed.command;
+      }
+      // For write_file: show filename or summary
+      else if (tool.name === 'write_file') {
+        if (parsed.path) {
+          displayCommand = `📁 ${parsed.path}`;
+        } else if (parsed.content) {
+          const lines = parsed.content.split('\n');
+          displayCommand = `📝 ${lines[0]?.slice(0, 50) || 'file content'}${lines.length > 1 ? '...' : ''}`;
+        }
+      }
+      // For other tools: show first key or JSON summary
+      else {
+        const keys = Object.keys(parsed);
+        displayCommand = keys.length > 0 ? `${keys[0]}: ${JSON.stringify(parsed[keys[0]]).slice(0, 50)}` : displayCommand;
+      }
+    }
+  } catch (e) {
+    // If parsing fails, show original
+  }
+
   const statusClass = tool.status === 'error'
     ? 'status-error'
     : tool.status === 'success'
@@ -221,7 +250,7 @@ const ToolCallBlock: React.FC<{ tool: ToolCall }> = ({ tool }) => {
         onClick={() => setExpanded(!expanded)}
       >
         <span className="tool-pill-chevron">{expanded ? '▼' : '▶'}</span>
-        {tool.name} · {tool.command}
+        {tool.name} · {displayCommand}
       </button>
 
       <div className={`tool-output ${expanded ? 'expanded' : 'collapsed'}`}>
@@ -273,15 +302,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     return (
       <div className="message-user-row message-row">
         <div className="message-user-bubble selectable">
-          {message.attachedFile && (
-            <div className="message-attached-file">
-              <div className="message-attached-file-icon">
-                <Paperclip size={16} />
-              </div>
-              <div className="message-attached-file-info">
-                <span className="message-attached-file-name">{message.attachedFile.name}</span>
-                <span className="message-attached-file-type">{message.attachedFile.name.split('.').pop()?.toUpperCase() || 'File'}</span>
-              </div>
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="message-attachments">
+              {message.attachments.map((file) => (
+                <AttachmentChip key={file.id} file={file} variant="sent" />
+              ))}
             </div>
           )}
           {message.content}

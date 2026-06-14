@@ -1,0 +1,1224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Echo — Hermes Voice Mode</title>
+<meta name="description" content="Interactive mockup of Echo, the live voice mode for Hermes overlay">
+<style>
+/* ============================================
+   ECHO MOCKUP — DESIGN TOKENS
+   ============================================ */
+:root {
+  color-scheme: dark;
+  --bg-base: #111112;
+  --bg-elevated: #1C1C1E;
+  --text-primary: #E8E8ED;
+  --text-secondary: #8E8E93;
+  --text-muted: #48484A;
+  --accent-primary: #0A84FF;
+  --accent-success: #30D158;
+  --accent-error: #FF453A;
+  --accent-warning: #FF9F0A;
+  --border-light: rgba(255, 255, 255, 0.08);
+  --border-divider: rgba(255, 255, 255, 0.06);
+
+  /* Echo-specific tokens */
+  --echo-listening: #A78BFA;
+  --echo-speaking: #818CF8;
+  --echo-thinking: #C084FC;
+  --echo-interrupted: #34D399;
+  --echo-surface: rgba(255, 255, 255, 0.04);
+  --echo-surface-border: rgba(255, 255, 255, 0.08);
+
+  /* Motion */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-accel-out: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Fonts */
+  --font-sans: "SF Pro Text", -apple-system, "Segoe UI Variable", system-ui, sans-serif;
+  --font-mono: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+}
+
+/* ── RESET ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================
+   ECHO CONTAINER
+   ============================================ */
+.echo-container {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Subtle radial gradient background that shifts with state */
+.echo-bg-gradient {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 800ms var(--ease-spring);
+  pointer-events: none;
+  z-index: 0;
+}
+.echo-bg-gradient.active { opacity: 1; }
+
+/* ── TIMER ── */
+.echo-timer {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--echo-listening);
+  background: rgba(167, 139, 250, 0.1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 5px 14px;
+  border-radius: 12px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  z-index: 20;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 400ms var(--ease-spring) 300ms,
+              transform 400ms var(--ease-spring) 300ms;
+}
+.echo-timer.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── EXIT BUTTON ── */
+.echo-exit-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 8px 16px;
+  border-radius: 20px;
+  transition: all 200ms cubic-bezier(0.25, 0.8, 0.25, 1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-spring) 400ms,
+              background 200ms ease,
+              border-color 200ms ease,
+              color 200ms ease,
+              transform 100ms ease;
+}
+.echo-exit-btn.visible { opacity: 1; }
+.echo-exit-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--text-primary);
+  transform: scale(1.03);
+}
+.echo-exit-btn:active { transform: scale(0.97); }
+.echo-exit-icon { font-size: 11px; opacity: 0.7; }
+
+/* ── TRANSCRIPT PILL ── */
+.echo-transcript-region {
+  width: 100%;
+  max-width: 520px;
+  padding: 0 24px;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  margin-bottom: 0;
+  z-index: 5;
+  transition: min-height 300ms ease, margin-bottom 300ms ease;
+}
+.echo-transcript-region.has-text {
+  min-height: 52px;
+  margin-bottom: 16px;
+}
+
+.echo-transcript-pill {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 400;
+  color: var(--text-primary);
+  max-width: 520px;
+  width: 100%;
+  text-align: center;
+  padding: 12px 22px;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
+  transition: opacity 350ms var(--ease-spring),
+              transform 350ms var(--ease-spring);
+}
+.echo-transcript-pill.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.echo-transcript-pill .interim {
+  opacity: 0.5;
+}
+
+.echo-transcript-pill .agent-word {
+  display: inline;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.echo-transcript-pill .agent-word.revealed {
+  opacity: 1;
+}
+
+/* Listening dot */
+.echo-listening-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--echo-listening);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: echoPulse 1.2s ease-in-out infinite;
+}
+@keyframes echoPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.7); }
+  50%      { opacity: 1;   transform: scale(1.2); }
+}
+
+/* ── ORB CENTER SECTION ── */
+.echo-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  z-index: 5;
+}
+
+.echo-orb-wrapper {
+  position: relative;
+  will-change: transform, opacity;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 700ms var(--ease-spring),
+              transform 700ms var(--ease-spring);
+}
+.echo-orb-wrapper.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+canvas#echoOrb {
+  display: block;
+  width: 280px;
+  height: 280px;
+}
+
+/* State label */
+.echo-state-label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  opacity: 0;
+  transform: translateY(6px);
+  filter: blur(4px);
+  transition: opacity 400ms var(--ease-spring),
+              transform 400ms var(--ease-spring),
+              filter 400ms var(--ease-spring),
+              color 300ms ease;
+  user-select: none;
+}
+.echo-state-label.visible {
+  opacity: 0.7;
+  transform: translateY(0);
+  filter: blur(0);
+}
+.echo-state-label[data-state="listening"]   { color: var(--echo-listening); }
+.echo-state-label[data-state="speaking"]    { color: var(--echo-speaking); }
+.echo-state-label[data-state="thinking"]    { color: var(--echo-thinking); }
+.echo-state-label[data-state="interrupted"] { color: var(--echo-interrupted); }
+.echo-state-label[data-state="muted"]       { color: var(--text-muted); }
+.echo-state-label[data-state="error"]       { color: var(--accent-error); }
+
+/* ── CONTROL CLUSTER ── */
+.echo-controls {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  z-index: 20;
+  opacity: 0;
+  transform: translateX(-50%) translateY(12px);
+  transition: opacity 400ms var(--ease-spring) 500ms,
+              transform 400ms var(--ease-spring) 500ms;
+}
+.echo-controls.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.echo-ctrl-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease,
+              color 150ms ease,
+              transform 80ms ease;
+  position: relative;
+  font-family: var(--font-sans);
+}
+.echo-ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  transform: scale(1.04);
+}
+.echo-ctrl-btn:active {
+  transform: scale(0.92);
+}
+.echo-ctrl-btn:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+.echo-ctrl-btn svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Muted state */
+.echo-ctrl-btn.muted {
+  color: var(--accent-error);
+  background: rgba(255, 69, 58, 0.12);
+}
+.echo-ctrl-btn.muted:hover {
+  background: rgba(255, 69, 58, 0.2);
+}
+
+/* Divider in controls */
+.echo-ctrl-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+
+/* End button variant */
+.echo-ctrl-btn.end-btn {
+  width: auto;
+  padding: 0 14px;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+.echo-ctrl-btn.end-btn:hover {
+  color: var(--accent-error);
+  background: rgba(255, 69, 58, 0.1);
+}
+
+/* ── STATE SWITCHER (MOCKUP ONLY) ── */
+.mockup-controls {
+  position: absolute;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 100;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 500px;
+}
+
+.mockup-btn {
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.mockup-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+.mockup-btn.active {
+  background: rgba(167, 139, 250, 0.2);
+  border-color: rgba(167, 139, 250, 0.4);
+  color: var(--echo-listening);
+}
+
+.mockup-label {
+  position: absolute;
+  bottom: 126px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  z-index: 100;
+  white-space: nowrap;
+}
+
+/* ── ARIA LIVE REGION ── */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── ERROR BANNER ── */
+.echo-error-banner {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #7F1D1D;
+  color: #FECACA;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  z-index: 30;
+  opacity: 0;
+  transition: opacity 300ms ease;
+  white-space: nowrap;
+}
+.echo-error-banner.visible { opacity: 1; }
+
+/* ── TYPE-TO-ECHO INPUT BAR ── */
+.echo-text-input-bar {
+  position: absolute;
+  bottom: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 90%;
+  max-width: 440px;
+  padding: 6px 6px 6px 18px;
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.06);
+  z-index: 25;
+  animation: echoTextBarIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes echoTextBarIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px) scale(0.95); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+.echo-text-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 400;
+  caret-color: var(--echo-listening);
+  min-width: 0;
+}
+.echo-text-input::placeholder { color: var(--text-muted); }
+.echo-text-send-btn {
+  width: 32px; height: 32px;
+  border: none; border-radius: 50%;
+  background: var(--echo-listening);
+  color: white; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: background 150ms ease, transform 80ms ease;
+}
+.echo-text-send-btn:hover { background: #9678f0; transform: scale(1.06); }
+.echo-text-send-btn:active { transform: scale(0.92); }
+.echo-text-dismiss-btn {
+  width: 32px; height: 32px;
+  border: none; border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: all 150ms ease;
+}
+.echo-text-dismiss-btn:hover { background: rgba(255,255,255,0.12); color: var(--text-secondary); }
+.echo-ctrl-btn.active { color: var(--echo-listening); background: rgba(167,139,250,0.15); }
+
+/* ── REDUCED MOTION ── */
+@media (prefers-reduced-motion: reduce) {
+  .echo-listening-dot { animation: none; opacity: 0.7; }
+  .echo-orb-wrapper { transition-duration: 0ms; }
+  .echo-state-label { transition-duration: 0ms; filter: none !important; }
+  .echo-transcript-pill { transition-duration: 0ms; }
+  .echo-text-input-bar { animation: none; opacity: 1; }
+}
+</style>
+</head>
+<body>
+
+<div class="echo-container" id="echoContainer">
+  <!-- Background gradient (shifts with state) -->
+  <div class="echo-bg-gradient" id="bgGradient"></div>
+
+  <!-- Timer -->
+  <div class="echo-timer" id="echoTimer">0:00</div>
+
+  <!-- Exit button -->
+  <button class="echo-exit-btn" id="exitBtn">
+    <span class="echo-exit-icon">✕</span>
+    <span>End</span>
+  </button>
+
+  <!-- Transcript pill -->
+  <div class="echo-transcript-region" id="transcriptRegion">
+    <div class="echo-transcript-pill" id="transcriptPill">
+      <span class="echo-listening-dot" id="listeningDot" style="display:none"></span>
+      <span id="transcriptText"></span>
+    </div>
+  </div>
+
+  <!-- Orb -->
+  <div class="echo-center">
+    <div class="echo-orb-wrapper" id="orbWrapper">
+      <canvas id="echoOrb" width="560" height="560"></canvas>
+    </div>
+    <div class="echo-state-label" id="stateLabel" data-state="initializing">Starting up</div>
+  </div>
+
+  <!-- Control cluster -->
+  <div class="echo-controls" id="controlCluster">
+    <button class="echo-ctrl-btn" id="muteBtn" aria-label="Toggle mute" title="Mute / Unmute (Space)">
+      <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+    </button>
+    <div class="echo-ctrl-divider"></div>
+    <button class="echo-ctrl-btn" id="textBtn" aria-label="Type a message" title="Type a message (T)">
+      <svg viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>
+    </button>
+    <div class="echo-ctrl-divider"></div>
+    <button class="echo-ctrl-btn" id="volumeBtn" aria-label="Volume" title="Volume">
+      <svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+    </button>
+    <div class="echo-ctrl-divider"></div>
+    <button class="echo-ctrl-btn end-btn" id="endBtn" aria-label="End Echo session" title="End Echo">
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+      <span>End</span>
+    </button>
+  </div>
+
+  <!-- Type-to-Echo input bar -->
+  <div class="echo-text-input-bar" id="textInputBar" style="display:none">
+    <input class="echo-text-input" id="textInput" type="text" placeholder="Type a message…" autocomplete="off" spellcheck="false" />
+    <button class="echo-text-dismiss-btn" id="textDismissBtn">
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <button class="echo-text-send-btn" id="textSendBtn" style="display:none">
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+    </button>
+  </div>
+
+  <!-- Error banner -->
+  <div class="echo-error-banner" id="errorBanner">Cannot access microphone. Check permissions.</div>
+
+  <!-- Mockup state switcher -->
+  <div class="mockup-label">Press 1-7 to switch states · Space to mute · T to type</div>
+  <div class="mockup-controls" id="mockupControls">
+    <button class="mockup-btn" data-state="initializing">Init</button>
+    <button class="mockup-btn active" data-state="listening">Listening</button>
+    <button class="mockup-btn" data-state="thinking">Thinking</button>
+    <button class="mockup-btn" data-state="speaking">Speaking</button>
+    <button class="mockup-btn" data-state="interrupted">Interrupt</button>
+    <button class="mockup-btn" data-state="muted">Muted</button>
+    <button class="mockup-btn" data-state="error">Error</button>
+    <button class="mockup-btn" data-state="typing">Type</button>
+  </div>
+
+  <!-- Accessibility: live region -->
+  <div class="sr-only" role="status" aria-live="polite" id="ariaAnnounce"></div>
+</div>
+
+<script>
+// ============================================
+// ECHO MOCKUP — INTERACTIVE STATE ENGINE
+// ============================================
+
+const canvas = document.getElementById('echoOrb');
+const ctx = canvas.getContext('2d');
+const DPR = window.devicePixelRatio || 1;
+
+// Hi-DPI setup
+canvas.width = 560 * DPR;
+canvas.height = 560 * DPR;
+canvas.style.width = '280px';
+canvas.style.height = '280px';
+ctx.scale(DPR, DPR);
+
+const W = 560 / DPR; // logical 280
+const H = 560 / DPR;
+const CX = W / 2, CY = H / 2;
+const BASE_R = 48;
+
+// ── STATE ──
+let currentState = 'listening';
+let isMuted = false;
+let phase = 0;
+let timerSeconds = 0;
+let timerInterval = null;
+
+// ── LERP TARGETS & CURRENT ──
+const orb = {
+  scale: 1, targetScale: 1,
+  glowR: 0.6, targetGlowR: 0.6, glowG: 0.55, targetGlowG: 0.55, glowB: 0.98, targetGlowB: 0.98,
+  ringAlpha: 0, targetRingAlpha: 0.12,
+  ringExpansion: 0,
+  amplitude: 0, targetAmplitude: 0,
+  glowIntensity: 0.15, targetGlowIntensity: 0.15,
+  interruptFlash: 0,
+};
+
+// Simulated amplitude — smooth noise
+let ampNoise = 0;
+let ampTarget = 0;
+let ampChangeTimer = 0;
+
+// ── COLOR MAPS ──
+const stateColors = {
+  initializing: { r: 167, g: 139, b: 250 },  // --echo-listening (dimmed)
+  listening:    { r: 167, g: 139, b: 250 },  // --echo-listening
+  thinking:     { r: 192, g: 132, b: 252 },  // --echo-thinking
+  speaking:     { r: 129, g: 140, b: 248 },  // --echo-speaking
+  interrupted:  { r: 52,  g: 211, b: 153 },  // --echo-interrupted
+  muted:        { r: 100, g: 100, b: 110 },  // gray
+  error:        { r: 255, g: 69,  b: 58  },  // --accent-error
+};
+
+const stateLabels = {
+  initializing: 'Starting up',
+  listening: 'Listening',
+  thinking: 'Thinking',
+  speaking: 'Speaking',
+  interrupted: 'Interrupted',
+  muted: 'Muted',
+  error: 'Error',
+};
+
+// ── ELEMENTS ──
+const el = {
+  timer: document.getElementById('echoTimer'),
+  exitBtn: document.getElementById('exitBtn'),
+  transcriptRegion: document.getElementById('transcriptRegion'),
+  transcriptPill: document.getElementById('transcriptPill'),
+  transcriptText: document.getElementById('transcriptText'),
+  listeningDot: document.getElementById('listeningDot'),
+  orbWrapper: document.getElementById('orbWrapper'),
+  stateLabel: document.getElementById('stateLabel'),
+  controlCluster: document.getElementById('controlCluster'),
+  muteBtn: document.getElementById('muteBtn'),
+  bgGradient: document.getElementById('bgGradient'),
+  errorBanner: document.getElementById('errorBanner'),
+  ariaAnnounce: document.getElementById('ariaAnnounce'),
+};
+
+// ── SIMULATED TRANSCRIPT TEXT ──
+const listeningPhrases = [
+  "How does the cardiovascular system regulate blood pressure",
+  "Explain the mechanism of action for beta blockers",
+  "What are the latest guidelines for hypertension management",
+  "Can you summarize the pathophysiology of heart failure",
+];
+const speakingPhrases = [
+  "The cardiovascular system regulates blood pressure through a complex interplay of neural, hormonal, and renal mechanisms. The baroreceptor reflex provides rapid short-term control by detecting changes in arterial wall stretch.",
+  "Beta blockers work by competitively antagonizing the effects of catecholamines at beta-adrenergic receptors, reducing heart rate, contractility, and renin release from the juxtaglomerular apparatus.",
+];
+
+let currentTranscript = '';
+let transcriptCharIdx = 0;
+let speakingWordIdx = 0;
+let speakingWords = [];
+let phraseIdx = 0;
+
+// ── INIT ──
+function init() {
+  // Stagger element entrance
+  setTimeout(() => { el.timer.classList.add('visible'); }, 300);
+  setTimeout(() => { el.exitBtn.classList.add('visible'); }, 400);
+  setTimeout(() => { el.orbWrapper.classList.add('visible'); }, 100);
+  setTimeout(() => { el.stateLabel.classList.add('visible'); }, 450);
+  setTimeout(() => { el.controlCluster.classList.add('visible'); }, 500);
+
+  // Start timer
+  timerInterval = setInterval(() => {
+    timerSeconds++;
+    const m = Math.floor(timerSeconds / 60);
+    const s = timerSeconds % 60;
+    el.timer.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+  }, 1000);
+
+  setState('listening');
+  requestAnimationFrame(renderLoop);
+}
+
+// ── STATE MACHINE ──
+function setState(state) {
+  currentState = state;
+  const color = stateColors[state] || stateColors.listening;
+
+  // Update targets
+  orb.targetGlowR = color.r / 255;
+  orb.targetGlowG = color.g / 255;
+  orb.targetGlowB = color.b / 255;
+
+  switch (state) {
+    case 'initializing':
+      orb.targetScale = 0.35;
+      orb.targetRingAlpha = 0;
+      orb.targetGlowIntensity = 0.1;
+      orb.targetAmplitude = 0;
+      break;
+    case 'listening':
+      orb.targetScale = 0.95;
+      orb.targetRingAlpha = 0.12;
+      orb.targetGlowIntensity = 0.15;
+      break;
+    case 'thinking':
+      orb.targetScale = 1.0;
+      orb.targetRingAlpha = 0;
+      orb.targetGlowIntensity = 0.15;
+      orb.targetAmplitude = 0;
+      break;
+    case 'speaking':
+      orb.targetScale = 1.0;
+      orb.targetRingAlpha = 0.18;
+      orb.targetGlowIntensity = 0.2;
+      break;
+    case 'interrupted':
+      orb.scale = 0.9; // Snap — no lerp
+      orb.interruptFlash = 1.0;
+      orb.targetRingAlpha = 0;
+      orb.targetGlowIntensity = 0.25;
+      // Auto-transition to listening after 600ms
+      setTimeout(() => { if (currentState === 'interrupted') setState('listening'); }, 600);
+      break;
+    case 'muted':
+      orb.targetScale = 0.8;
+      orb.targetRingAlpha = 0;
+      orb.targetGlowIntensity = 0.08;
+      orb.targetAmplitude = 0;
+      isMuted = true;
+      el.muteBtn.classList.add('muted');
+      el.muteBtn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.12 1.49-.34 2.18"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
+      break;
+    case 'error':
+      orb.targetScale = 0.7;
+      orb.targetRingAlpha = 0;
+      orb.targetGlowIntensity = 0.1;
+      orb.targetAmplitude = 0;
+      break;
+  }
+
+  if (state !== 'muted') {
+    isMuted = false;
+    el.muteBtn.classList.remove('muted');
+    el.muteBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
+  }
+
+  // Update label
+  el.stateLabel.setAttribute('data-state', state);
+  el.stateLabel.textContent = stateLabels[state] || state;
+
+  // Update background gradient
+  el.bgGradient.style.background = `radial-gradient(circle at 50% 50%, rgba(${color.r}, ${color.g}, ${color.b}, 0.03) 0%, transparent 70%)`;
+  el.bgGradient.classList.add('active');
+
+  // Update transcript
+  updateTranscript(state);
+
+  // Error banner
+  el.errorBanner.classList.toggle('visible', state === 'error');
+
+  // Mockup buttons
+  document.querySelectorAll('.mockup-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.state === state);
+  });
+
+  // Aria announcement
+  const announcements = {
+    initializing: 'Echo mode starting up',
+    listening: 'Hermes is listening',
+    thinking: 'Hermes is thinking',
+    speaking: 'Hermes is speaking',
+    interrupted: 'Interrupted. Hermes is listening.',
+    muted: 'Microphone muted',
+    error: 'Error: Cannot access microphone',
+  };
+  el.ariaAnnounce.textContent = announcements[state] || '';
+}
+
+// ── TRANSCRIPT MANAGEMENT ──
+let transcriptTypeTimer = null;
+let speakingRevealTimer = null;
+
+function updateTranscript(state) {
+  clearInterval(transcriptTypeTimer);
+  clearInterval(speakingRevealTimer);
+
+  if (state === 'listening' && !isMuted) {
+    // Simulate typing transcript
+    const phrase = listeningPhrases[phraseIdx % listeningPhrases.length];
+    transcriptCharIdx = 0;
+    el.listeningDot.style.display = 'inline-block';
+
+    el.transcriptRegion.classList.add('has-text');
+    el.transcriptPill.classList.add('visible');
+
+    transcriptTypeTimer = setInterval(() => {
+      transcriptCharIdx++;
+      if (transcriptCharIdx <= phrase.length) {
+        const finalPart = phrase.substring(0, Math.max(0, transcriptCharIdx - 8));
+        const interimPart = phrase.substring(Math.max(0, transcriptCharIdx - 8), transcriptCharIdx);
+        el.transcriptText.innerHTML = finalPart + '<span class="interim">' + interimPart + '</span>';
+      } else {
+        clearInterval(transcriptTypeTimer);
+      }
+    }, 60);
+    phraseIdx++;
+
+  } else if (state === 'speaking') {
+    // Word-by-word reveal of agent response
+    const phrase = speakingPhrases[phraseIdx % speakingPhrases.length];
+    speakingWords = phrase.split(' ');
+    speakingWordIdx = 0;
+    el.listeningDot.style.display = 'none';
+
+    el.transcriptRegion.classList.add('has-text');
+    el.transcriptPill.classList.add('visible');
+
+    // Build word spans
+    el.transcriptText.innerHTML = speakingWords
+      .map((w, i) => `<span class="agent-word" data-idx="${i}">${w}</span>`)
+      .join(' ');
+
+    // Reveal words one by one
+    speakingRevealTimer = setInterval(() => {
+      const wordEl = el.transcriptText.querySelector(`[data-idx="${speakingWordIdx}"]`);
+      if (wordEl) {
+        wordEl.classList.add('revealed');
+        speakingWordIdx++;
+      } else {
+        clearInterval(speakingRevealTimer);
+      }
+    }, 140);
+
+  } else if (state === 'thinking') {
+    // Keep previous transcript visible but remove dot
+    el.listeningDot.style.display = 'none';
+    // Leave text as-is
+
+  } else if (state === 'interrupted') {
+    el.transcriptPill.classList.remove('visible');
+    el.transcriptRegion.classList.remove('has-text');
+    el.listeningDot.style.display = 'none';
+    el.transcriptText.innerHTML = '';
+
+  } else {
+    // Hide transcript
+    el.transcriptPill.classList.remove('visible');
+    el.transcriptRegion.classList.remove('has-text');
+    el.listeningDot.style.display = 'none';
+    el.transcriptText.innerHTML = '';
+  }
+}
+
+// ── AMPLITUDE SIMULATION ──
+function simulateAmplitude() {
+  ampChangeTimer -= 16;
+  if (ampChangeTimer <= 0) {
+    if (currentState === 'listening' && !isMuted) {
+      ampTarget = 0.15 + Math.random() * 0.6;
+    } else if (currentState === 'speaking') {
+      ampTarget = 0.2 + Math.random() * 0.55;
+    } else {
+      ampTarget = 0;
+    }
+    ampChangeTimer = 80 + Math.random() * 200;
+  }
+  ampNoise += (ampTarget - ampNoise) * 0.12;
+  orb.amplitude += (ampNoise - orb.amplitude) * 0.15;
+}
+
+// ── RENDER LOOP ──
+function renderLoop() {
+  phase += 0.02;
+  simulateAmplitude();
+
+  // Lerp all properties
+  const lerpRate = 0.06;
+  const fastLerp = 0.1;
+  orb.scale += (orb.targetScale - orb.scale) * lerpRate;
+  orb.glowR += (orb.targetGlowR - orb.glowR) * lerpRate;
+  orb.glowG += (orb.targetGlowG - orb.glowG) * lerpRate;
+  orb.glowB += (orb.targetGlowB - orb.glowB) * lerpRate;
+  orb.ringAlpha += (orb.targetRingAlpha - orb.ringAlpha) * fastLerp;
+  orb.glowIntensity += (orb.targetGlowIntensity - orb.glowIntensity) * lerpRate;
+  orb.interruptFlash *= 0.92; // Decay flash
+
+  // State-specific scale modulation
+  let scaleModulation = 0;
+  if (currentState === 'initializing') {
+    scaleModulation = Math.sin(phase * 3) * 0.05;
+  } else if (currentState === 'listening') {
+    scaleModulation = orb.amplitude * 0.12 + Math.sin(phase * 2) * 0.015;
+  } else if (currentState === 'thinking') {
+    scaleModulation = Math.sin(phase * 1.5) * 0.02;
+  } else if (currentState === 'speaking') {
+    scaleModulation = orb.amplitude * 0.18;
+  } else if (currentState === 'muted') {
+    scaleModulation = Math.sin(phase * 0.5) * 0.008;
+  }
+
+  const finalScale = orb.scale + scaleModulation;
+  const orbR = BASE_R * finalScale;
+  const cr = Math.round(orb.glowR * 255);
+  const cg = Math.round(orb.glowG * 255);
+  const cb = Math.round(orb.glowB * 255);
+
+  // Clear
+  ctx.clearRect(0, 0, W, H);
+
+  // ── RINGS ──
+  if (orb.ringAlpha > 0.005) {
+    const ringCount = 3;
+    for (let i = 0; i < ringCount; i++) {
+      const delay = (i / ringCount) * Math.PI * 2;
+      let expansion;
+      if (currentState === 'listening') {
+        expansion = orb.amplitude * 40 + Math.sin(phase + delay) * 8;
+      } else if (currentState === 'speaking') {
+        expansion = orb.amplitude * 60 + Math.sin(phase * 1.5 + delay) * 12;
+      } else {
+        expansion = Math.sin(phase + delay) * 4;
+      }
+      const ringR = BASE_R + 22 + i * 22 + expansion;
+      const alpha = Math.max(0, orb.ringAlpha - i * 0.03);
+
+      ctx.beginPath();
+      ctx.arc(CX, CY, Math.max(1, ringR), 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, ${alpha})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // ── THINKING SHIMMER ──
+  if (currentState === 'thinking') {
+    if (ctx.createConicGradient) {
+      const conic = ctx.createConicGradient(phase, CX, CY);
+      conic.addColorStop(0,   `rgba(${cr}, ${cg}, ${cb}, 0.3)`);
+      conic.addColorStop(0.25, `rgba(${cr}, ${cg}, ${cb}, 0.05)`);
+      conic.addColorStop(0.5, `rgba(${cr}, ${cg}, ${cb}, 0.3)`);
+      conic.addColorStop(0.75, `rgba(${cr}, ${cg}, ${cb}, 0.05)`);
+      conic.addColorStop(1,   `rgba(${cr}, ${cg}, ${cb}, 0.3)`);
+
+      ctx.beginPath();
+      ctx.arc(CX, CY, orbR + 8, 0, Math.PI * 2);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = conic;
+      ctx.stroke();
+    } else {
+      // Fallback
+      const alpha = 0.15 + Math.sin(phase * 2) * 0.08;
+      ctx.beginPath();
+      ctx.arc(CX, CY, orbR + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, ${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  // ── INTERRUPT RIPPLE ──
+  if (orb.interruptFlash > 0.01) {
+    const rippleR = orbR + (1 - orb.interruptFlash) * 80;
+    ctx.beginPath();
+    ctx.arc(CX, CY, Math.max(1, rippleR), 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(52, 211, 153, ${orb.interruptFlash * 0.8})`;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Second ripple (delayed)
+    if (orb.interruptFlash < 0.7) {
+      const ripple2R = orbR + (1 - orb.interruptFlash * 1.4) * 60;
+      ctx.beginPath();
+      ctx.arc(CX, CY, Math.max(1, ripple2R), 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(52, 211, 153, ${orb.interruptFlash * 0.4})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // ── OUTER GLOW ──
+  const glowRadius = orbR * 2.5;
+  const glow = ctx.createRadialGradient(CX, CY, 0, CX, CY, glowRadius);
+  const glowAlpha = orb.glowIntensity + orb.amplitude * 0.1;
+  glow.addColorStop(0,   `rgba(${cr}, ${cg}, ${cb}, ${glowAlpha})`);
+  glow.addColorStop(0.4, `rgba(${cr}, ${cg}, ${cb}, ${glowAlpha * 0.3})`);
+  glow.addColorStop(1,   `rgba(${cr}, ${cg}, ${cb}, 0)`);
+  ctx.beginPath();
+  ctx.arc(CX, CY, glowRadius, 0, Math.PI * 2);
+  ctx.fillStyle = glow;
+  ctx.fill();
+
+  // ── CORE ORB ──
+  // Slight highlight offset for 3D feel
+  const hlX = CX - orbR * 0.2;
+  const hlY = CY - orbR * 0.25;
+  const core = ctx.createRadialGradient(hlX, hlY, 0, CX, CY, orbR);
+
+  // Mix interrupt flash (emerald) into core color
+  const flashR = orb.interruptFlash * 52  + (1 - orb.interruptFlash) * cr;
+  const flashG = orb.interruptFlash * 211 + (1 - orb.interruptFlash) * cg;
+  const flashB = orb.interruptFlash * 153 + (1 - orb.interruptFlash) * cb;
+
+  core.addColorStop(0,    'rgba(255, 255, 255, 1)');
+  core.addColorStop(0.3,  `rgba(240, 240, 255, 0.95)`);
+  core.addColorStop(0.7,  `rgba(${Math.round(flashR)}, ${Math.round(flashG)}, ${Math.round(flashB)}, 0.8)`);
+  core.addColorStop(1,    `rgba(${Math.round(flashR * 0.7)}, ${Math.round(flashG * 0.7)}, ${Math.round(flashB * 0.7)}, 0.6)`);
+
+  ctx.beginPath();
+  ctx.arc(CX, CY, orbR, 0, Math.PI * 2);
+  ctx.fillStyle = core;
+  ctx.fill();
+
+  // ── TOP SPECULAR HIGHLIGHT ──
+  const specular = ctx.createRadialGradient(CX, CY - orbR * 0.35, 0, CX, CY - orbR * 0.15, orbR * 0.6);
+  specular.addColorStop(0, 'rgba(255, 255, 255, 0.35)');
+  specular.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, orbR, 0, Math.PI * 2);
+  ctx.fillStyle = specular;
+  ctx.fill();
+
+  requestAnimationFrame(renderLoop);
+}
+
+// ── EVENT HANDLERS ──
+
+// Mockup state buttons
+document.querySelectorAll('.mockup-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.state === 'typing') {
+      toggleTextInput();
+    } else {
+      setState(btn.dataset.state);
+    }
+  });
+});
+
+// ── TEXT INPUT STATE ──
+let isTextInputOpen = false;
+const textInputBar = document.getElementById('textInputBar');
+const textInput = document.getElementById('textInput');
+const textBtn = document.getElementById('textBtn');
+const textDismissBtn = document.getElementById('textDismissBtn');
+const textSendBtn = document.getElementById('textSendBtn');
+
+function toggleTextInput() {
+  if (isTextInputOpen) {
+    closeTextInput();
+  } else {
+    openTextInput();
+  }
+}
+
+function openTextInput() {
+  isTextInputOpen = true;
+  textInputBar.style.display = 'flex';
+  textBtn.classList.add('active');
+  textInput.value = '';
+  textInput.focus();
+  // Auto-mute while typing
+  if (!isMuted) setState('muted');
+  // Update mockup buttons
+  document.querySelectorAll('.mockup-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.state === 'typing');
+  });
+}
+
+function closeTextInput() {
+  isTextInputOpen = false;
+  textInputBar.style.display = 'none';
+  textBtn.classList.remove('active');
+  textInput.value = '';
+  // Un-mute and resume listening
+  setState('listening');
+}
+
+function submitTextInput() {
+  const text = textInput.value.trim();
+  if (!text) return;
+  closeTextInput();
+  // Simulate: show typed text in transcript, then think, then speak
+  el.listeningDot.style.display = 'none';
+  el.transcriptRegion.classList.add('has-text');
+  el.transcriptPill.classList.add('visible');
+  el.transcriptText.textContent = text;
+  setState('thinking');
+  setTimeout(() => {
+    if (currentState === 'thinking') setState('speaking');
+  }, 1500);
+}
+
+// Show/hide send vs dismiss based on input content
+textInput.addEventListener('input', () => {
+  if (textInput.value.trim()) {
+    textSendBtn.style.display = 'flex';
+    textDismissBtn.style.display = 'none';
+  } else {
+    textSendBtn.style.display = 'none';
+    textDismissBtn.style.display = 'flex';
+  }
+});
+
+textInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    submitTextInput();
+  }
+  // Don't propagate Escape from input — let it close text input
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeTextInput();
+  }
+});
+
+textDismissBtn.addEventListener('click', closeTextInput);
+textSendBtn.addEventListener('click', submitTextInput);
+textBtn.addEventListener('click', toggleTextInput);
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  // Don't intercept keys while typing in text input
+  if (e.target === textInput) return;
+
+  const keyMap = { '1': 'initializing', '2': 'listening', '3': 'thinking', '4': 'speaking', '5': 'interrupted', '6': 'muted', '7': 'error' };
+  if (keyMap[e.key]) {
+    if (isTextInputOpen) closeTextInput();
+    setState(keyMap[e.key]);
+  }
+  if (e.key === ' ') {
+    e.preventDefault();
+    toggleMute();
+  }
+  if (e.key === 't' || e.key === 'T') {
+    e.preventDefault();
+    toggleTextInput();
+  }
+  if (e.key === 'Escape') {
+    if (isTextInputOpen) {
+      closeTextInput();
+    }
+  }
+});
+
+// Mute button
+el.muteBtn.addEventListener('click', toggleMute);
+
+function toggleMute() {
+  if (isTextInputOpen) closeTextInput();
+  if (isMuted) {
+    setState('listening');
+  } else {
+    setState('muted');
+  }
+}
+
+// End button
+el.endBtn.addEventListener('click', () => {
+  if (isTextInputOpen) closeTextInput();
+  setState('initializing');
+  setTimeout(() => setState('listening'), 1200);
+});
+
+// Exit button
+el.exitBtn.addEventListener('click', () => {
+  if (isTextInputOpen) closeTextInput();
+  setState('initializing');
+  setTimeout(() => setState('listening'), 1200);
+});
+
+// ── START ──
+init();
+</script>
+
+</body>
+</html>

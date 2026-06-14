@@ -32,10 +32,10 @@ Then:
 - Press **Ctrl+Alt+H** to toggle visibility
 - Dev tools open automatically (press F12 to close)
 
-### Method 3: F9 Hotkey (If AutoHotkey installed)
+### Method 3: Hotkey (If AutoHotkey installed)
 ```
-Double-click: C:\Users\jijin\hermes-overlay\f9-hotkey.ahk
-Press F9 anywhere to launch
+Double-click: C:\Users\jijin\hermes-overlay\hotkey.ahk
+Press the configured hotkey to launch
 ```
 
 ## 🎨 What You'll See Now

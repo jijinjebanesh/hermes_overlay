@@ -24,8 +24,14 @@ export interface StreamSegment {
 }
 
 export interface AttachedFile {
+  id: string;
   name: string;
   path: string;
+  content: string | null;
+  tooBig: boolean;
+  size: number;
+  ext: string;
+  isImage: boolean;
 }
 
 export interface Message {
@@ -38,7 +44,7 @@ export interface Message {
   toolCalls?: ToolCall[];
   /** Structured segments from hermes output (tool activity, diffs, thinking, text) */
   segments?: StreamSegment[];
-  attachedFile?: AttachedFile;
+  attachments?: AttachedFile[];
 }
 
 export interface StreamState {
@@ -78,7 +84,7 @@ interface OverlayState {
   toolMode: ToolMode;
   inputHistory: string[];
   historyIndex: number;
-  fileAttached: AttachedFile | null;
+  pendingAttachments: AttachedFile[];
 
   // Config
   localMode: boolean;
@@ -94,20 +100,44 @@ interface OverlayState {
   launchAtStartup: boolean;
   globalHotkey: string;
   alwaysOnTop: boolean;
-  opacity: number;
+
   smallWindow: boolean;
   theme: 'system' | 'light' | 'dark';
+  accentColor: string;
   fontFamily: string;
+
+  // Echo Settings
+  echoClapWakeEnabled: boolean;
+  echoVoiceModeEnabled: boolean;
+  echoInterruptWords: string[];
+  echoExitWords: string[];
+  echoClapSensitivity: number;
+  echoTtsProvider: 'elevenlabs' | 'edge-tts' | 'openai';
+  echoTtsVoice: string;
+  echoWakeWordEnabled: boolean;
+  echoWakeWord: string;
+  echoDoubleClapMinimize: boolean;
 
   // Actions
   setSettingsOpen: (isOpen: boolean) => void;
   setLaunchAtStartup: (enable: boolean) => void;
-  setGlobalHotkey: (hotkey: string) => void;
-  setAlwaysOnTop: (enable: boolean) => void;
-  setOpacity: (opacity: number) => void;
-  setSmallWindow: (enable: boolean) => void;
-  setTheme: (theme: 'system' | 'light' | 'dark') => void;
-  setFontFamily: (fontFamily: string) => void;
+  setGlobalHotkey: (key: string) => void;
+  setAlwaysOnTop: (always: boolean) => void;
+
+  setSmallWindow: (s: boolean) => void;
+  setTheme: (t: 'system' | 'light' | 'dark') => void;
+  setAccentColor: (color: string) => void;
+  setFontFamily: (f: string) => void;
+  setEchoClapWakeEnabled: (enabled: boolean) => void;
+  setEchoInterruptWords: (words: string[]) => void;
+  setEchoExitWords: (words: string[]) => void;
+  setEchoVoiceModeEnabled: (enabled: boolean) => void;
+  setEchoClapSensitivity: (sensitivity: number) => void;
+  setEchoTtsProvider: (provider: 'elevenlabs' | 'edge-tts' | 'openai') => void;
+  setEchoTtsVoice: (voice: string) => void;
+  setEchoWakeWordEnabled: (enabled: boolean) => void;
+  setEchoWakeWord: (word: string) => void;
+  setEchoDoubleClapMinimize: (enabled: boolean) => void;
   setToolMode: (mode: ToolMode) => void;
   
   addMessage: (msg: Message) => void;
@@ -125,7 +155,9 @@ interface OverlayState {
   setInventoryLoading: (loading: boolean) => void;
   addToHistory: (input: string) => void;
   undo: (turns: number) => void;
-  setFileAttached: (file: AttachedFile | null) => void;
+  addPendingAttachments: (files: AttachedFile[]) => void;
+  removePendingAttachment: (fileId: string) => void;
+  clearPendingAttachments: () => void;
 }
 
 
@@ -143,7 +175,7 @@ const generateId = () =>
 
 export const useOverlayStore = create<OverlayState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       sessionId: generateId(),
       messages: [],
 
@@ -157,7 +189,7 @@ export const useOverlayStore = create<OverlayState>()(
       toolMode: 'all' as ToolMode,
       inputHistory: [],
       historyIndex: -1,
-      fileAttached: null,
+      pendingAttachments: [],
 
       localMode: false,
       activeModel: '',
@@ -171,10 +203,22 @@ export const useOverlayStore = create<OverlayState>()(
       launchAtStartup: false,
       globalHotkey: 'CommandOrControl+Alt+H',
       alwaysOnTop: true,
-      opacity: 0.96,
+
       smallWindow: false,
       theme: 'system',
-      fontFamily: 'system-ui',
+      accentColor: 'blue',
+      fontFamily: 'Inter',
+
+      echoClapWakeEnabled: true,
+      echoVoiceModeEnabled: false,
+      echoInterruptWords: ['stop', 'wait', 'shut up', 'hey hermes'],
+      echoExitWords: ['goodbye', 'close', 'exit', 'stop reading'],
+      echoClapSensitivity: 0.5,
+      echoTtsProvider: 'edge-tts',
+      echoTtsVoice: 'en-US-AriaNeural',
+      echoWakeWordEnabled: false,
+      echoWakeWord: 'hey hermes',
+      echoDoubleClapMinimize: false,
 
       /* ── Actions ── */
 
@@ -191,15 +235,13 @@ export const useOverlayStore = create<OverlayState>()(
         set({ alwaysOnTop: enable });
         (window as any).electronAPI?.setAlwaysOnTop(enable);
       },
-      setOpacity: (opacity) => {
-        set({ opacity });
-        (window as any).electronAPI?.setOpacity(opacity);
-      },
+
       setSmallWindow: (enable) => {
         set({ smallWindow: enable });
         (window as any).electronAPI?.setSmallWindow(enable);
       },
       setTheme: (theme) => set({ theme }),
+      setAccentColor: (accentColor) => set({ accentColor }),
       setFontFamily: (fontFamily) => set({ fontFamily }),
       setToolMode: (mode) => set({ toolMode: mode }),
 
@@ -280,7 +322,45 @@ export const useOverlayStore = create<OverlayState>()(
           };
         }),
 
-      setFileAttached: (file) => set({ fileAttached: file }),
+      setEchoClapWakeEnabled: (enabled) =>
+        set((state) => ({ ...state, echoClapWakeEnabled: enabled })),
+      setEchoInterruptWords: (words) =>
+        set((state) => ({ ...state, echoInterruptWords: words })),
+      setEchoExitWords: (words) =>
+        set((state) => ({ ...state, echoExitWords: words })),
+
+      addPendingAttachments: (files) =>
+        set((state) => ({
+          pendingAttachments: [...state.pendingAttachments, ...files]
+        })),
+      
+      removePendingAttachment: (fileId) =>
+        set((state) => ({
+          pendingAttachments: state.pendingAttachments.filter(f => f.id !== fileId)
+        })),
+      
+      clearPendingAttachments: () => set({ pendingAttachments: [] }),
+
+      setEchoVoiceModeEnabled: (enabled) =>
+        set((state) => ({ ...state, echoVoiceModeEnabled: enabled })),
+      
+      setEchoClapSensitivity: (sensitivity) =>
+        set((state) => ({ ...state, echoClapSensitivity: sensitivity })),
+      
+      setEchoTtsProvider: (provider) =>
+        set((state) => ({ ...state, echoTtsProvider: provider })),
+      
+      setEchoTtsVoice: (voice) =>
+        set((state) => ({ ...state, echoTtsVoice: voice })),
+        
+      setEchoWakeWordEnabled: (enabled) =>
+        set((state) => ({ ...state, echoWakeWordEnabled: enabled })),
+        
+      setEchoWakeWord: (word) =>
+        set((state) => ({ ...state, echoWakeWord: word })),
+        
+      setEchoDoubleClapMinimize: (enabled) =>
+        set((state) => ({ ...state, echoDoubleClapMinimize: enabled })),
     }),
     {
       name: 'hermes-overlay-storage',
@@ -293,11 +373,17 @@ export const useOverlayStore = create<OverlayState>()(
         launchAtStartup: state.launchAtStartup,
         globalHotkey: state.globalHotkey,
         alwaysOnTop: state.alwaysOnTop,
-        opacity: state.opacity,
+
         smallWindow: state.smallWindow,
         toolMode: state.toolMode,
         theme: state.theme,
         fontFamily: state.fontFamily,
+        echoClapWakeEnabled: state.echoClapWakeEnabled,
+        echoInterruptWords: state.echoInterruptWords,
+        echoExitWords: state.echoExitWords,
+        echoWakeWordEnabled: state.echoWakeWordEnabled,
+        echoWakeWord: state.echoWakeWord,
+        echoDoubleClapMinimize: state.echoDoubleClapMinimize,
       }),
     }
   )

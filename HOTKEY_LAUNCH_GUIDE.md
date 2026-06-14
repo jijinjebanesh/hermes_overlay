@@ -1,4 +1,4 @@
-# Hermes Overlay — F9 Launch Guide
+# Hermes Overlay — F2 Launch Guide
 
 ## Build Status ✅
 
@@ -11,19 +11,19 @@ The Hermes Overlay has been **fully built and is ready to launch**.
 
 ---
 
-## How to Launch with F9
+## How to Launch with F2
 
 ### Option A: AutoHotkey (Recommended for Windows)
 
 **Requirements**: AutoHotkey v2.0+ installed
 
 1. Download and install **AutoHotkey v2.0** from https://www.autohotkey.com/
-2. Run the F9 hotkey script:
+2. Run the hotkey script:
    ```
-   C:\Users\jijin\hermes-overlay\f9-hotkey.ahk
+   C:\Users\jijin\hermes-overlay\hotkey.ahk
    ```
-3. A tooltip will appear showing "F9 Daemon Active"
-4. **Press F9 anywhere on your desktop** to launch the overlay
+3. A tooltip will appear showing the active hotkey
+4. **Press the configured hotkey** anywhere on your desktop to launch the overlay
 
 **To stop**: Right-click the AutoHotkey tray icon → Exit
 
@@ -68,7 +68,7 @@ C:\Users\jijin\hermes-overlay\launch.bat
 
 ## What You'll See
 
-When you press F9 or `npm run dev`:
+When you press the configured hotkey or `npm run dev`:
 
 1. **Electron window opens** with the Hermes Overlay (bottom-right, 500×800px)
 2. **Command Rail** on the left (8 mode icons)
@@ -158,8 +158,8 @@ When running `npm run dev`:
 
 ## Troubleshooting
 
-### F9 doesn't work
-- AutoHotkey not running? Right-click `f9-hotkey.ahk` → "Run Script"
+### F2 doesn't work
+- AutoHotkey not running? Right-click `hotkey.ahk` → "Run Script"
 - Or use `npm run dev` directly
 
 ### Overlay doesn't appear
@@ -173,7 +173,7 @@ When running `npm run dev`:
 
 ### Overlay is hidden
 - Press Ctrl+Alt+H to toggle visibility
-- Or close the window (it will reopen on next F9)
+- Or close the window (it will reopen on next hotkey press)
 
 ### Port 5173 already in use
 - Kill the existing process: `npx lsof -i :5173` (macOS/Linux)
@@ -199,7 +199,7 @@ C:\Users\jijin\hermes-overlay\
 ├── vite.config.ts        # Vite build config
 ├── tailwind.config.ts    # Tailwind design tokens
 ├── launch.bat            # Quick launcher batch file
-├── f9-hotkey.ahk         # AutoHotkey F9 script
+├── hotkey.ahk            # AutoHotkey script (reconfigurable from overlay)
 ├── README.md             # Full documentation
 └── IMPLEMENTATION_CHECKLIST.md
 
@@ -209,11 +209,11 @@ C:\Users\jijin\hermes-overlay\
 
 ## Next Steps
 
-1. **Install AutoHotkey** (if using F9 hotkey)
+1. **Install AutoHotkey** (if using hotkey)
 2. **Run the script**:
-   - Option A: `C:\Users\jijin\hermes-overlay\f9-hotkey.ahk`
+   - Option A: `C:\Users\jijin\hermes-overlay\hotkey.ahk`
    - Option B: `npm run dev` in a terminal
-3. **Press F9** or wait for window to open
+3. **Press the configured hotkey** or wait for window to open
 4. **Try sending a message**: Type "Hello" in the input bar
 5. **Explore zones**: Click the tabs in the right sidebar to see Jobs, Memory, Agents
 6. **Test zen mode**: Press Ctrl+Shift+Z for full-screen
@@ -222,7 +222,7 @@ C:\Users\jijin\hermes-overlay\
 
 ## Ready? 🚀
 
-**Press F9 now!** (or `npm run dev` in terminal)
+**Press the configured hotkey now!** (or `npm run dev` in terminal)
 
 The Hermes Overlay is fully built and waiting for you.
 

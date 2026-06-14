@@ -5,6 +5,9 @@ import { InputBar } from '../components/InputBar';
 import { SettingsModal } from '../components/SettingsModal';
 import { useOverlayStore } from '../store/overlayStore';
 import type { StreamSegment } from '../store/overlayStore';
+import { EchoMode } from '../components/EchoMode';
+import type { EchoSessionTurn } from '../components/EchoMode';
+import { WakeWordListener } from '../components/WakeWordListener';
 
 /**
  * Root component. Renders the three-section layout:
@@ -31,10 +34,15 @@ export const App: React.FC = () => {
     setInventory,
     setInventoryLoading,
     theme,
-    fontFamily
+    accentColor,
+    fontFamily,
+
   } = useOverlayStore();
 
   const [isVisible, setIsVisible] = useState(true);
+  const [isEchoMode, setIsEchoMode] = useState(false);
+  const [echoTransitioning, setEchoTransitioning] = useState(false);
+  const echoStartTimeRef = useRef<number>(0);
 
   // ── Theme & Font Engine ──
   useEffect(() => {
@@ -42,6 +50,12 @@ export const App: React.FC = () => {
     if (fontFamily) {
       document.documentElement.style.setProperty('--font-sans', fontFamily);
     }
+
+    // Accent Color
+    if (accentColor) {
+      document.documentElement.setAttribute('data-accent', accentColor);
+    }
+
 
     // Theme logic
     const safeTheme = theme || 'system';
@@ -59,7 +73,7 @@ export const App: React.FC = () => {
     } else {
       applyTheme(safeTheme === 'dark');
     }
-  }, [theme, fontFamily]);
+  }, [theme, accentColor, fontFamily]);
 
   // ── Focus helper ──
   const focusInput = useCallback(() => {
@@ -97,7 +111,11 @@ export const App: React.FC = () => {
     if (api.onVisibilityChange) {
       cleanups.push(api.onVisibilityChange((visible: boolean) => {
         setIsVisible(visible);
-        if (visible) focusInput();
+        if (visible) {
+          focusInput();
+        } else {
+          setIsEchoMode(false); // Close Echo mode when hidden
+        }
       }));
     }
 
@@ -138,8 +156,32 @@ export const App: React.FC = () => {
       }));
     }
 
+    // Echo mode handler
+    if (api.onEnterEchoMode) {
+      cleanups.push(api.onEnterEchoMode(() => {
+        setIsEchoMode(true);
+      }));
+    }
+
     return () => cleanups.forEach(fn => fn());
   }, [addMessage, appendSegmentToLast, focusInput, setStreamState, updateLastMessage]);
+
+  // ── ⌘⇧E / Ctrl+Shift+E to enter Echo mode ──
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        if (isEchoMode) {
+          setIsEchoMode(false);
+          setEchoTransitioning(false);
+        } else {
+          enterEchoMode();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isEchoMode]);
 
   // Stream duration timer
   useEffect(() => {
@@ -175,7 +217,7 @@ export const App: React.FC = () => {
     e.preventDefault();
     e.stopPropagation();
     dragCounter.current += 1;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+    if (e.dataTransfer.types.includes('Files')) {
       setIsDragging(true);
     }
   };
@@ -184,7 +226,7 @@ export const App: React.FC = () => {
     e.preventDefault();
     e.stopPropagation();
     dragCounter.current -= 1;
-    if (dragCounter.current === 0) {
+    if (dragCounter.current === 0 && e.currentTarget === e.target) {
       setIsDragging(false);
     }
   };
@@ -194,17 +236,15 @@ export const App: React.FC = () => {
     e.stopPropagation();
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     dragCounter.current = 0;
     setIsDragging(false);
 
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
 
-    // Windows drag-and-drop often has empty file.type — fall back to extension
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
     const supportedExts = [
       // Images
       'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico',
@@ -216,24 +256,103 @@ export const App: React.FC = () => {
       'cs', 'swift', 'kt', 'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
       'html', 'css', 'scss', 'less', 'sql', 'graphql',
     ];
-    const isSupported = supportedExts.includes(ext) || file.type !== '';
 
-    if (isSupported) {
+    const readPromises = files.map(async (file) => {
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      const isSupported = supportedExts.includes(ext) || file.type !== '';
+      if (!isSupported) return null;
+
       const filePath = (file as any).path || '';
-      useOverlayStore.getState().setFileAttached({ path: filePath, name: file.name });
+      if (!filePath) return null;
+
+      try {
+        const result = await (window as any).electronAPI.readDroppedFile(filePath);
+        return {
+          ...result,
+          id: crypto.randomUUID?.() || Math.random().toString(36).substring(2)
+        };
+      } catch (e) {
+        console.error('Failed to read dropped file:', e);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(readPromises);
+    const validFiles = results.filter((f): f is any => f !== null && !f.error);
+    
+    if (validFiles.length > 0) {
+      useOverlayStore.getState().addPendingAttachments(validFiles);
     }
   };
 
+  // ── Echo Mode Helpers ──
+  const enterEchoMode = useCallback(() => {
+    echoStartTimeRef.current = Date.now();
+    setEchoTransitioning(true);
+    // Phase 1: dissolve chat (200ms), then show Echo
+    setTimeout(() => {
+      setIsEchoMode(true);
+    }, 150);
+  }, []);
+
+  const handleEchoExit = useCallback((sessionTranscript?: EchoSessionTurn[]) => {
+    setIsEchoMode(false);
+    // Phase 2: restore chat surface
+    setTimeout(() => {
+      setEchoTransitioning(false);
+      focusInput();
+    }, 200);
+
+    // Merge transcript into conversation if there were exchanges
+    if (sessionTranscript && sessionTranscript.length > 0) {
+      const durationSec = Math.floor((Date.now() - echoStartTimeRef.current) / 1000);
+      const mins = Math.floor(durationSec / 60);
+      const secs = durationSec % 60;
+      const durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+      const exchanges = Math.floor(sessionTranscript.length / 2);
+
+      // Build a readable transcript
+      const transcriptLines = sessionTranscript.map(t =>
+        `**${t.role === 'user' ? 'You' : 'Hermes'}:** ${t.text}`
+      ).join('\n\n');
+
+      addMessage({
+        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        role: 'assistant',
+        content: `🎙 **Echo Session** · ${durationStr} · ${exchanges} exchange${exchanges !== 1 ? 's' : ''}\n\n${transcriptLines}`,
+        timestamp: Date.now(),
+      });
+    }
+  }, [addMessage, focusInput]);
+
   const showDragOverlay = isDragging;
+  const shellClasses = [
+    'overlay-shell',
+    useOverlayStore().smallWindow ? 'small-mode' : '',
+    !isVisible ? 'hidden' : '',
+    echoTransitioning ? 'echo-dissolve' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <>
       <div 
-        className={`overlay-shell ${useOverlayStore().smallWindow ? 'small-mode' : ''} ${!isVisible ? 'hidden' : ''}`}
+        className={shellClasses}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        style={{
+          ...(echoTransitioning && !isEchoMode ? {
+            opacity: 0,
+            transform: 'translateY(-8px)',
+            transition: 'opacity 200ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1)',
+          } : echoTransitioning ? {
+            opacity: 0,
+            transform: 'translateY(-8px)',
+            pointerEvents: 'none' as const,
+            transition: 'opacity 200ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1)',
+          } : {})
+        }}
       >
         {showDragOverlay && (
           <div className="global-drag-overlay">
@@ -248,7 +367,17 @@ export const App: React.FC = () => {
         <Conversation />
         <InputBar inputRef={inputRef} />
       </div>
+      
+      {/* Settings Modal Layer */}
       <SettingsModal />
+
+      {/* Echo Mode Layer */}
+      {isEchoMode && (
+        <EchoMode onExit={handleEchoExit} />
+      )}
+
+      {/* Global Wake Word Listener */}
+      <WakeWordListener />
     </>
   );
 };

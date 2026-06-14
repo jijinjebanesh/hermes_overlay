@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Wrench, TerminalSquare, Slash, ArrowUp, Square, X, Plus, Image as ImageIcon, Camera } from 'lucide-react';
+import { Send, TerminalSquare, Slash, Wrench, File, X, Loader2, Plus, Image as ImageIcon, Camera, AudioLines, Square, ArrowUp } from 'lucide-react';
 import { useOverlayStore } from '../store/overlayStore';
+import { AttachmentChip } from './AttachmentChip';
 
 /**
  * INPUT BAR — 56px, 16px horizontal padding.
@@ -32,7 +33,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     addMessage, addToHistory, inputHistory,
     clearSession, newSession, undo, localMode,
     sessionId, setStreamState, updateLastMessage,
-    fileAttached, setFileAttached
+    pendingAttachments, addPendingAttachments, removePendingAttachment, clearPendingAttachments
   } = useOverlayStore();
 
   const [input, setInput] = useState('');
@@ -41,6 +42,16 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
   const rejectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const fileAttached = pendingAttachments.length > 0;
+  const [echoTooltip, setEchoTooltip] = useState<string | null>(null);
+
+  // ── AUTOCOMPLETE STATE ──
+  const [suggestions, setSuggestions] = useState<Array<{name: string, isDir: boolean, size: number}>>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
+  const [autocompletePrefix, setAutocompletePrefix] = useState('');
+  const [autocompleteQuery, setAutocompleteQuery] = useState('');
+  const [isAutocompleteOpen, setIsAutocompleteOpen] = useState(false);
+  const [lastWord, setLastWord] = useState('');
 
   // Focus input on mount
   useEffect(() => {
@@ -51,9 +62,14 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (isAutocompleteOpen) {
+          setIsAutocompleteOpen(false);
+          return;
+        }
         if (input.trim().length > 0) {
           // First press: clear input
           setInput('');
+          setIsAutocompleteOpen(false);
           resetTextarea();
         } else {
           // Second press: close overlay
@@ -85,6 +101,36 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
   /* ── KEYBOARD HANDLING ── */
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // ── Autocomplete Navigation ──
+    if (isAutocompleteOpen && suggestions.length > 0) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => (prev > 0 ? prev - 1 : suggestions.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : 0));
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault();
+        const selected = suggestions[selectedSuggestionIndex];
+        if (selected) {
+          const newPath = autocompletePrefix + selected.name + (selected.isDir ? '/' : '');
+          const newInput = input.slice(0, -lastWord.length) + newPath;
+          setInput(newInput);
+          setIsAutocompleteOpen(false);
+          
+          if (selected.isDir) {
+            // Trigger fetch for the new directory automatically
+            fetchSuggestions(newPath, '', newPath);
+          }
+        }
+        return;
+      }
+    }
+
     // ── Tab completion for slash commands ──
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -138,9 +184,46 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
 
   /* ── INPUT CHANGE ── */
 
+  const fetchSuggestions = async (dirPath: string, query: string, word: string) => {
+    setAutocompletePrefix(dirPath);
+    setAutocompleteQuery(query);
+    setLastWord(word);
+    
+    try {
+      if (api?.readDir) {
+        const results = await api.readDir(dirPath);
+        const filtered = results.filter((r: any) => r.name.toLowerCase().startsWith(query.toLowerCase()));
+        setSuggestions(filtered);
+        setSelectedSuggestionIndex(filtered.length > 0 ? 0 : -1);
+        setIsAutocompleteOpen(filtered.length > 0);
+      }
+    } catch (e) {
+      setIsAutocompleteOpen(false);
+    }
+  };
+
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
+    const val = e.target.value;
+    setInput(val);
     setHistoryIndex(-1);
+
+    // Path autocomplete detection
+    const words = val.split(/\s+/);
+    const word = words[words.length - 1];
+    
+    const isPath = /^(?:[a-zA-Z]:[/\\]|[/\\]|\.[/\\]|\.\.[/\\]|~[/\\])/.test(word);
+    if (isPath) {
+      const lastSlashIndex = Math.max(word.lastIndexOf('/'), word.lastIndexOf('\\'));
+      if (lastSlashIndex !== -1) {
+        const dirPath = word.substring(0, lastSlashIndex + 1);
+        const query = word.substring(lastSlashIndex + 1);
+        fetchSuggestions(dirPath, query, word);
+      } else {
+        setIsAutocompleteOpen(false);
+      }
+    } else {
+      setIsAutocompleteOpen(false);
+    }
 
     // Auto-resize (up to 4 lines ≈ 96px)
     if (inputRef.current) {
@@ -180,50 +263,98 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     const trimmed = input.trim();
     addToHistory(trimmed);
 
+    // ── Local File Opening ──
+    const isExplicitOpen = trimmed.toLowerCase().startsWith('open ');
+    const isRawAbsolutePath = /^(?:[a-zA-Z]:[/\\]|[/\\])/.test(trimmed);
+    
+    let targetPath = '';
+    let shouldOpenLocally = false;
+
+    if (isExplicitOpen) {
+      const pathAfterOpen = trimmed.substring(5).trim();
+      // Only intercept 'open ' if what follows actually looks like a file path
+      const pathLooksLikeFile = /^(?:[a-zA-Z]:[/\\]|[/\\]|\.[/\\]|\.\.[/\\]|~[/\\])/.test(pathAfterOpen) || pathAfterOpen.includes('.mkv') || pathAfterOpen.includes('.mp4');
+      if (pathLooksLikeFile) {
+        targetPath = pathAfterOpen;
+        shouldOpenLocally = true;
+      }
+    } else if (isRawAbsolutePath) {
+      if (!trimmed.toLowerCase().includes('what') && !trimmed.toLowerCase().includes('why') && !trimmed.toLowerCase().includes('how') && !trimmed.endsWith('?')) {
+        targetPath = trimmed;
+        shouldOpenLocally = true;
+      }
+    }
+
+    if (shouldOpenLocally) {
+      // Remove any surrounding quotes
+      if (targetPath.startsWith('"') && targetPath.endsWith('"')) targetPath = targetPath.slice(1, -1);
+      if (targetPath.startsWith("'") && targetPath.endsWith("'")) targetPath = targetPath.slice(1, -1);
+      
+      addMessage({
+        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        role: 'user',
+        content: trimmed,
+        timestamp: Date.now(),
+      });
+      addMessage({
+        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        role: 'assistant',
+        content: `Opening ${targetPath}...`,
+        timestamp: Date.now(),
+      });
+      
+      api?.openPath?.(targetPath);
+      
+      setInput('');
+      clearPendingAttachments();
+      resetTextarea();
+      return;
+    }
+
     // ── Slash commands ──
-    if (trimmed === '/clear') {
-      clearSession();
-      setInput('');
-      setFileAttached(null);
-      resetTextarea();
-      return;
-    }
+        if (trimmed === '/clear') {
+          clearSession();
+          clearPendingAttachments();
+          setInput('');
+          resetTextarea();
+          return;
+        }
 
-    if (trimmed === '/new') {
-      newSession();
-      setInput('');
-      setFileAttached(null);
-      resetTextarea();
-      return;
-    }
+        if (trimmed === '/new') {
+          newSession();
+          clearPendingAttachments();
+          setInput('');
+          resetTextarea();
+          return;
+        }
 
-    if (trimmed.startsWith('/undo')) {
-      const parts = trimmed.split(' ');
-      const turns = parts.length > 1 ? parseInt(parts[1], 10) : 1;
-      if (!isNaN(turns)) undo(turns);
-      setInput('');
-      setFileAttached(null);
-      resetTextarea();
-      return;
-    }
+        if (trimmed.startsWith('/undo')) {
+          const parts = trimmed.split(' ');
+          const turns = parts.length > 1 ? parseInt(parts[1], 10) : 1;
+          if (!isNaN(turns)) undo(turns);
+          clearPendingAttachments();
+          setInput('');
+          resetTextarea();
+          return;
+        }
 
-    if (trimmed === '/save') {
-      // Build markdown from messages
-      const messages = useOverlayStore.getState().messages;
-      const markdown = [
-        `# Session ${sessionId}`,
-        `Saved at ${new Date().toISOString()}`,
-        '',
-        ...messages.map((m) =>
-          `**${m.role === 'user' ? 'You' : 'Hermes'}:** ${m.content}`
-        ),
-      ].join('\n\n');
-      api?.saveSession({ sessionId, markdown });
-      setInput('');
-      setFileAttached(null);
-      resetTextarea();
-      return;
-    }
+        if (trimmed === '/save') {
+          // Build markdown from messages
+          const messages = useOverlayStore.getState().messages;
+          const markdown = [
+            `# Session ${sessionId}`,
+            `Saved at ${new Date().toISOString()}`,
+            '',
+            ...messages.map((m) =>
+              `**${m.role === 'user' ? 'You' : 'Hermes'}:** ${m.content}`
+            ),
+          ].join('\\n\\n');
+          api?.saveSession({ sessionId, markdown });
+          clearPendingAttachments();
+          setInput('');
+          resetTextarea();
+          return;
+        }
 
     if (trimmed === '/history') {
       // Show input history inline
@@ -257,108 +388,149 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
         role: 'user',
         content: trimmed,
-        timestamp: Date.now(),
-      });
-      addMessage({
-        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
-        role: 'assistant',
-        content: 'Local mode — remote calls blocked.',
-        timestamp: Date.now(),
-      });
-      setInput('');
-      setFileAttached(null);
-      resetTextarea();
-      return;
-    }
+                attachments: pendingAttachments.length > 0 ? [...pendingAttachments] : undefined,
+                timestamp: Date.now(),
+              });
+              setInput('');
+              clearPendingAttachments();
+              resetTextarea();
+              return;
+            }
 
-    // ── Add user message to store ──
-    addMessage({
-      id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
-      role: 'user',
-      content: trimmed,
-      attachedFile: fileAttached ? { name: fileAttached.name, path: fileAttached.path } : undefined,
-      timestamp: Date.now(),
-    });
+            // ── Build attachment context XML ──
+            let attachmentContext = '';
+            let attachmentPayload: typeof pendingAttachments = [];
+    
+            if (pendingAttachments.length > 0) {
+              const filesWithContent = pendingAttachments.filter(f => f.content !== null && !f.tooBig);
+              if (filesWithContent.length > 0) {
+                attachmentContext = filesWithContent
+                  .map(f => `<file name="${f.name}" path="${f.path}">\n${f.content}\n</file>`)
+                  .join('\n\n') + '\n\n';
+              }
+              attachmentPayload = [...pendingAttachments];
+            }
 
-    // ── Create empty assistant message for streaming ──
-    addMessage({
-      id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      isStreaming: true,
-    });
+            const fullPayload = attachmentContext + trimmed;
 
-    // ── Start stream state ──
-    setStreamState({
-      isStreaming: true,
-      tokens: 0,
-      duration: 0,
-      mode: toolMode,
-    });
+            // ── Add user message to store ──
+            addMessage({
+              id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+              role: 'user',
+              content: trimmed,
+              attachments: attachmentPayload,
+              timestamp: Date.now(),
+            });
 
-    // ── Send via IPC ──
-    const state = useOverlayStore.getState();
-    api?.sendMessage({
-      text: trimmed,
-      file: fileAttached?.path,
-      sessionId,
-      toolMode,
-      provider: state.activeProvider,
-      model: state.activeModel,
+            // ── Create empty assistant message for streaming ──
+            addMessage({
+              id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+              role: 'assistant',
+              content: '',
+              timestamp: Date.now(),
+              isStreaming: true,
+            });
+
+            // ── Start stream state ──
+            setStreamState({
+              isStreaming: true,
+              tokens: 0,
+              duration: 0,
+              mode: toolMode,
+            });
+
+            // ── Send via IPC ──
+            const state = useOverlayStore.getState();
+            api?.sendMessage({
+              text: fullPayload,
+              sessionId,
+              toolMode,
+              provider: state.activeProvider,
+              model: state.activeModel,
     });
 
     setInput('');
-    setFileAttached(null);
-    setHistoryIndex(-1);
-    resetTextarea();
-  };
+        clearPendingAttachments();
+        setHistoryIndex(-1);
+        resetTextarea();
+      };
 
 
-  /* ── STREAM CANCEL ── */
+      /* ── STREAM CANCEL ── */
 
-  const handleStop = () => {
-    api?.abortStream();
-    setStreamState({ isStreaming: false });
-    updateLastMessage((msg) => ({
-      ...msg,
-      isStreaming: false,
-      cancelled: true,
-    }));
-  };
+      const handleStop = () => {
+        api?.abortStream();
+        setStreamState({ isStreaming: false });
+        updateLastMessage((msg) => ({
+          ...msg,
+          isStreaming: false,
+          cancelled: true,
+        }));
+      };
 
 
-  const showReject = (msg: string) => {
-    setRejectTooltip(msg);
-    if (rejectTimer.current) clearTimeout(rejectTimer.current);
-    rejectTimer.current = setTimeout(() => setRejectTooltip(null), 2000);
-  };
+      const showReject = (msg: string) => {
+        setRejectTooltip(msg);
+        if (rejectTimer.current) clearTimeout(rejectTimer.current);
+        rejectTimer.current = setTimeout(() => setRejectTooltip(null), 2000);
+      };
 
-  /* ── ATTACHMENTS ── */
+      /* ── ATTACHMENTS ── */
 
-  const handleAttachFile = async () => {
-    setShowAttachMenu(false);
-    try {
-      const result = await api?.openFileDialog();
-      if (result) setFileAttached(result);
-    } catch (e) {
-      showReject('Failed to open file picker');
-    }
-  };
+            const handleAttachFile = async () => {
+              setShowAttachMenu(false);
+              try {
+                const result = await api?.openFileDialog();
+                if (result) {
+                  const fileResult = await api?.readDroppedFile(result.path);
+                  if (fileResult) {
+                    addPendingAttachments([{
+                      ...fileResult,
+                      id: crypto.randomUUID?.() || Math.random().toString(36).substring(2)
+                    }]);
+                  }
+                }
+              } catch (e) {
+                showReject('Failed to open file picker');
+              }
+            };
 
-  const handleScreenshot = async () => {
-    setShowAttachMenu(false);
-    try {
-      const result = await api?.captureScreenshot();
-      if (result) {
-        setFileAttached(result);
-      } else {
-        showReject('Failed to capture screen');
-      }
-    } catch (e) {
-      showReject('Screenshot error');
-    }
-  };
+            const handleScreenshot = async () => {
+              setShowAttachMenu(false);
+              try {
+                const result = await api?.captureScreenshot();
+                if (result) {
+                  const fileResult = await api?.readDroppedFile(result.path);
+                  if (fileResult) {
+                    addPendingAttachments([{
+                      ...fileResult,
+                      id: crypto.randomUUID?.() || Math.random().toString(36).substring(2)
+                    }]);
+                  }
+                } else {
+                  showReject('Failed to capture screen');
+                }
+              } catch (e) {
+                showReject('Screenshot error');
+              }
+            };
+
+            /* ── ECHO MODE ── */
+
+            const handleEchoMode = () => {
+              // Show tooltip
+              setEchoTooltip('Starting Echo Mode...');
+              setTimeout(() => setEchoTooltip(null), 2000);
+        
+              // Trigger Echo Mode via IPC
+              try {
+                api?.triggerEchoMode?.();
+              } catch (e) {
+                console.error('Failed to trigger Echo Mode:', e);
+                setEchoTooltip('Echo Mode not available');
+                setTimeout(() => setEchoTooltip(null), 2000);
+              }
+            };
 
 
   /* ── TOOL ICON ── */
@@ -377,29 +549,17 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       ? 'Tool Mode: Terminal Only'
       : 'Tool Mode: No Tools';
 
-  const hasContent = input.trim().length > 0 || fileAttached !== null;
+  const hasContent = input.trim().length > 0 || pendingAttachments.length > 0;
 
-  return (
-    <div className="input-bar">
-      {/* File chips container (absolute positioned above input bar) */}
-      <div className="file-chips-container">
-        {fileAttached && (
-          <div className="file-chip">
-            <span className="file-chip-name">{fileAttached.name}</span>
-            <button className="file-chip-close" onClick={() => setFileAttached(null)}>
-              <X size={12} />
-            </button>
-          </div>
+    return (
+      <div className="input-bar">
+        {/* Rejection tooltip */}
+        {rejectTooltip && (
+          <div className="drag-tooltip">{rejectTooltip}</div>
         )}
-      </div>
 
-      {/* Rejection tooltip */}
-      {rejectTooltip && (
-        <div className="drag-tooltip">{rejectTooltip}</div>
-      )}
-
-      {/* Attach Menu toggle */}
-      <div className="attach-container" ref={attachMenuRef}>
+        {/* Attach Menu toggle */}
+        <div className="attach-container" ref={attachMenuRef}>
         <button
           className={`attach-toggle-btn${showAttachMenu ? ' active' : ''}`}
           onClick={() => setShowAttachMenu(!showAttachMenu)}
@@ -432,38 +592,112 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         {renderToolIcon()}
       </button>
 
-      {/* Input */}
-      <textarea
-        ref={inputRef}
-        value={input}
-        onChange={handleInput}
-        onKeyDown={handleKeyDown}
-        placeholder="Ask Hermes"
-        className="input-textarea"
-        rows={1}
-      />
+      {/* Input Column (Attachments + Textarea) */}
+      <div className="input-content-col">
+        {/* Attachment Tray (Inline) */}
+        {pendingAttachments.length > 0 && (
+          <div className="attachment-tray">
+            {pendingAttachments.map((file) => (
+              <AttachmentChip
+                key={file.id}
+                file={file}
+                variant="pending"
+                onRemove={() => removePendingAttachment(file.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        <div style={{ position: 'relative', width: '100%' }}>
+          {isAutocompleteOpen && suggestions.length > 0 && (
+            <div className="autocomplete-menu">
+              {suggestions.map((sug, idx) => (
+                <div
+                  key={sug.name}
+                  className={`autocomplete-item ${idx === selectedSuggestionIndex ? 'selected' : ''}`}
+                  onClick={() => {
+                    const newPath = autocompletePrefix + sug.name + (sug.isDir ? '/' : '');
+                    const newInput = input.slice(0, -lastWord.length) + newPath;
+                    setInput(newInput);
+                    setIsAutocompleteOpen(false);
+                    if (sug.isDir) fetchSuggestions(newPath, '', newPath);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  <span className="autocomplete-name">{sug.name}{sug.isDir ? '/' : ''}</span>
+                  <span className="autocomplete-meta">
+                    {sug.isDir ? 'dir' : (sug.size > 1024 * 1024 ? (sug.size / (1024 * 1024)).toFixed(1) + 'M' : (sug.size > 1024 ? Math.round(sug.size / 1024) + 'K' : sug.size + 'B'))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask Hermes"
+            className="input-textarea"
+            rows={1}
+          />
+        </div>
+      </div>
 
       {/* Send / Stop button */}
-      <div style={{ display: 'flex', alignItems: 'center' }}>
-        {streamState.isStreaming && (
-          <button
-            className="send-btn streaming"
-            onClick={handleStop}
-            aria-label="Stop streaming"
-            style={{ marginRight: 0 }}
-          >
-            <Square size={14} fill="var(--text-secondary)" color="var(--text-secondary)" />
-          </button>
-        )}
-        <button
-          className={`send-btn ${hasContent ? 'ready' : 'idle'}`}
-          onClick={handleSubmit}
-          disabled={!hasContent}
-          aria-label="Send message"
-        >
-          <ArrowUp size={16} strokeWidth={2.5} />
-        </button>
-      </div>
-    </div>
-  );
-};
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {/* Echo Mode Button */}
+              <button
+                className="echo-mode-btn"
+                onClick={handleEchoMode}
+                title="Start Echo Mode (Voice Interaction)"
+                aria-label="Start Echo Mode"
+                onMouseEnter={() => setEchoTooltip('Start Echo Mode')}
+                onMouseLeave={() => setEchoTooltip(null)}
+              >
+                <AudioLines size={16} strokeWidth={2} />
+              </button>
+        
+              {streamState.isStreaming && (
+                <button
+                  className="send-btn streaming"
+                  onClick={handleStop}
+                  aria-label="Stop streaming"
+                  style={{ marginRight: 0 }}
+                >
+                  <Square size={14} fill="var(--text-secondary)" color="var(--text-secondary)" />
+                </button>
+              )}
+              <button
+                className={`send-btn ${hasContent ? 'ready' : 'idle'}`}
+                onClick={handleSubmit}
+                disabled={!hasContent}
+                aria-label="Send message"
+              >
+                <ArrowUp size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            {/* Echo Mode tooltip */}
+            {echoTooltip && (
+              <div className="echo-tooltip" style={{
+                position: 'absolute',
+                bottom: '70px',
+                right: '60px',
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border)',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                color: 'var(--text-primary)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                pointerEvents: 'none',
+                zIndex: 1000
+              }}>
+                {echoTooltip}
+              </div>
+            )}
+          </div>
+        );
+      };

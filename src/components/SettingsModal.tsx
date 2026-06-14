@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Command, Monitor, Zap, Layout } from 'lucide-react';
+import { X, Command, Monitor, Zap, Layout, Mic, Check } from 'lucide-react';
 import { useOverlayStore } from '../store/overlayStore';
 import type { ToolMode } from '../store/overlayStore';
 
@@ -12,7 +12,7 @@ export const SettingsModal: React.FC = () => {
     launchAtStartup, setLaunchAtStartup,
     globalHotkey, setGlobalHotkey,
     alwaysOnTop, setAlwaysOnTop,
-    opacity, setOpacity,
+
     toolMode, setToolMode,
     activeProvider, setActiveProvider,
     activeModel, setActiveModel,
@@ -20,17 +20,39 @@ export const SettingsModal: React.FC = () => {
     localMode, setLocalMode,
     clearSession,
     theme, setTheme,
+    accentColor, setAccentColor,
     fontFamily, setFontFamily,
-    smallWindow, setSmallWindow
+    smallWindow, setSmallWindow,
+    echoClapWakeEnabled, setEchoClapWakeEnabled,
+    echoWakeWordEnabled, setEchoWakeWordEnabled,
+    echoWakeWord, setEchoWakeWord,
+    echoDoubleClapMinimize, setEchoDoubleClapMinimize,
+    echoVoiceModeEnabled, setEchoVoiceModeEnabled,
+    echoClapSensitivity, setEchoClapSensitivity,
+    echoInterruptWords, setEchoInterruptWords,
+    echoExitWords, setEchoExitWords,
+    echoTtsProvider, setEchoTtsProvider,
+    echoTtsVoice, setEchoTtsVoice
   } = useOverlayStore();
 
   const safeGlobalHotkey = globalHotkey || 'CommandOrControl+Alt+H';
-  const safeOpacity = opacity ?? 0.96;
+  const safeOpacity = 1.0;
   const safeAlwaysOnTop = alwaysOnTop ?? true;
   const safeLaunchAtStartup = launchAtStartup ?? false;
   const safeSmallWindow = smallWindow ?? false;
 
-  const [activeTab, setActiveTab] = useState<'general' | 'hotkey' | 'ai' | 'window'>('general');
+  const EDGE_VOICES = [
+    { id: 'en-US-AriaNeural', name: 'Aria', accent: 'US Female' },
+    { id: 'en-US-GuyNeural', name: 'Guy', accent: 'US Male' },
+    { id: 'en-US-JennyNeural', name: 'Jenny', accent: 'US Female' },
+    { id: 'en-US-ChristopherNeural', name: 'Christopher', accent: 'US Male' },
+    { id: 'en-GB-SoniaNeural', name: 'Sonia', accent: 'UK Female' },
+    { id: 'en-GB-RyanNeural', name: 'Ryan', accent: 'UK Male' },
+    { id: 'en-AU-NatashaNeural', name: 'Natasha', accent: 'AU Female' },
+    { id: 'en-AU-WilliamNeural', name: 'William', accent: 'AU Male' },
+  ];
+
+  const [activeTab, setActiveTab] = useState<'general' | 'hotkey' | 'ai' | 'window' | 'echo'>('general');
   const [recordingHotkey, setRecordingHotkey] = useState(false);
   const [tempKeys, setTempKeys] = useState<string[]>([]);
 
@@ -139,6 +161,9 @@ export const SettingsModal: React.FC = () => {
           <button className={`settings-tab ${activeTab === 'window' ? 'active' : ''}`} onClick={() => setActiveTab('window')}>
             <Layout size={14} /> Window
           </button>
+          <button className={`settings-tab ${activeTab === 'echo' ? 'active' : ''}`} onClick={() => setActiveTab('echo')}>
+            <Mic size={14} /> Echo Mode
+          </button>
         </div>
 
         <div className="settings-content">
@@ -148,6 +173,7 @@ export const SettingsModal: React.FC = () => {
               {activeTab === 'hotkey' && 'Global Hotkey'}
               {activeTab === 'ai' && 'AI Settings'}
               {activeTab === 'window' && 'Window Preferences'}
+              {activeTab === 'echo' && 'Echo Mode'}
             </h3>
             <button className="settings-close-btn" onClick={handleClose}><X size={16} /></button>
           </div>
@@ -180,6 +206,23 @@ export const SettingsModal: React.FC = () => {
                 <div className="settings-divider" />
                 <div className="settings-row">
                   <div className="settings-label">
+                    <span>Accent Color</span>
+                    <span className="settings-desc">Choose your preferred system accent color.</span>
+                  </div>
+                  <div className="color-picker">
+                    {['blue', 'purple', 'pink', 'red', 'orange', 'green'].map(color => (
+                      <button
+                        key={color}
+                        className={`color-swatch ${color} ${accentColor === color ? 'active' : ''}`}
+                        onClick={() => setAccentColor(color)}
+                        aria-label={`${color} accent`}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-row">
+                  <div className="settings-label">
                     <span>Font Family</span>
                     <span className="settings-desc">Choose your preferred application font.</span>
                   </div>
@@ -201,6 +244,172 @@ export const SettingsModal: React.FC = () => {
               </div>
             )}
 
+            {activeTab === 'echo' && (
+              <div className="settings-section">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 14 }}>Echo Mode Settings</h3>
+                  <span style={{ fontSize: 10, color: '#a78bfa', background: 'rgba(167, 139, 250, 0.1)', padding: '2px 8px', borderRadius: 4 }}>BETA</span>
+                </div>
+                
+                <div className="settings-row">
+                  <div className="settings-label">
+                    <span>Double-Clap to Wake</span>
+                    <span className="settings-desc">Activate Echo Mode when you double-clap near your microphone.</span>
+                  </div>
+                  <label className="mac-toggle">
+                    <input type="checkbox" checked={echoClapWakeEnabled} onChange={(e) => setEchoClapWakeEnabled(e.target.checked)} />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-row">
+                  <div className="settings-label">
+                     <span>Wake Word</span>
+                     <span className="settings-desc">Activate Echo Mode when you say a specific word or phrase.</span>
+                  </div>
+                  <label className="mac-toggle">
+                     <input type="checkbox" checked={echoWakeWordEnabled} onChange={(e) => setEchoWakeWordEnabled(e.target.checked)} />
+                     <span className="slider"></span>
+                  </label>
+                </div>
+                {echoWakeWordEnabled && (
+                  <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <div className="settings-label" style={{ marginBottom: 8 }}>
+                      <span>Wake Phrase</span>
+                      <span className="settings-desc">The phrase to listen for (e.g. "hey hermes"). Needs internet.</span>
+                    </div>
+                    <input 
+                      type="text" 
+                      className="mac-input" 
+                      style={{ width: '100%' }}
+                      value={echoWakeWord} 
+                      onChange={(e) => setEchoWakeWord(e.target.value)}
+                    />
+                  </div>
+                )}
+                <div className="settings-divider" />
+                <div className="settings-row">
+                  <div className="settings-label">
+                     <span>Double-Clap to Minimize</span>
+                     <span className="settings-desc">Minimize the overlay instead of ignoring if you double clap while it's open.</span>
+                  </div>
+                  <label className="mac-toggle">
+                     <input type="checkbox" checked={echoDoubleClapMinimize} onChange={(e) => setEchoDoubleClapMinimize(e.target.checked)} />
+                     <span className="slider"></span>
+                  </label>
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-row">
+                  <div className="settings-label">
+                    <span>Voice Mode</span>
+                    <span className="settings-desc">Keep microphone always-on for instant voice responses.</span>
+                  </div>
+                  <label className="mac-toggle">
+                    <input type="checkbox" checked={echoVoiceModeEnabled} onChange={(e) => setEchoVoiceModeEnabled(e.target.checked)} />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-row">
+                  <div className="settings-label">
+                    <span>Clap Sensitivity</span>
+                    <span className="settings-desc">Adjust detection threshold (lower = more sensitive).</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.1"
+                    value={echoClapSensitivity}
+                    onChange={(e) => setEchoClapSensitivity(parseFloat(e.target.value))}
+                    style={{ width: 120 }}
+                  />
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 30, textAlign: 'right' }}>
+                    {echoClapSensitivity.toFixed(1)}
+                  </span>
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <div className="settings-label" style={{ marginBottom: 8 }}>
+                    <span>Interrupt Words</span>
+                    <span className="settings-desc">Words that will stop Hermes from speaking (comma separated).</span>
+                  </div>
+                  <input 
+                    type="text" 
+                    className="mac-input" 
+                    style={{ width: '100%' }}
+                    value={echoInterruptWords.join(', ')} 
+                    onChange={(e) => setEchoInterruptWords(e.target.value.split(',').map(s => s.trim()))}
+                  />
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <div className="settings-label" style={{ marginBottom: 8 }}>
+                    <span>Exit Words</span>
+                    <span className="settings-desc">Words that will exit Echo Mode completely (comma separated).</span>
+                  </div>
+                  <input 
+                    type="text" 
+                    className="mac-input" 
+                    style={{ width: '100%' }}
+                    value={echoExitWords.join(', ')} 
+                    onChange={(e) => setEchoExitWords(e.target.value.split(',').map(s => s.trim()))}
+                  />
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <div className="settings-label" style={{ marginBottom: 8 }}>
+                    <span>TTS Provider</span>
+                    <span className="settings-desc">Choose which service generates voice responses.</span>
+                  </div>
+                  <select
+                    className="mac-input"
+                    style={{ width: '100%', cursor: 'pointer' }}
+                    value={echoTtsProvider}
+                    onChange={(e) => setEchoTtsProvider(e.target.value as any)}
+                  >
+                    <option value="edge-tts">Edge TTS (Free, Microsoft voices)</option>
+                    <option value="openai">OpenAI TTS (High quality)</option>
+                    <option value="elevenlabs">ElevenLabs (Most natural)</option>
+                  </select>
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <div className="settings-label" style={{ marginBottom: 12 }}>
+                    <span>TTS Voice</span>
+                    <span className="settings-desc">Select a curated natural voice for Hermes.</span>
+                  </div>
+                  
+                  {echoTtsProvider === 'edge-tts' ? (
+                    <div className="voice-picker-list">
+                      {EDGE_VOICES.map((voice) => (
+                        <button
+                          key={voice.id}
+                          className={`voice-picker-item ${echoTtsVoice === voice.id ? 'active' : ''}`}
+                          onClick={() => setEchoTtsVoice(voice.id)}
+                        >
+                          <div className="voice-picker-info">
+                            <span className="voice-name">{voice.name}</span>
+                            <span className="voice-accent">{voice.accent}</span>
+                          </div>
+                          {echoTtsVoice === voice.id && <Check size={16} className="voice-check" />}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      className="mac-input"
+                      style={{ width: '100%' }}
+                      value={echoTtsVoice}
+                      onChange={(e) => setEchoTtsVoice(e.target.value)}
+                      placeholder="e.g., en-US-AriaNeural"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
             {activeTab === 'hotkey' && (
               <div className="settings-section">
                 <div className="settings-row">
@@ -216,6 +425,9 @@ export const SettingsModal: React.FC = () => {
                   </button>
                 </div>
                 {recordingHotkey && <div className="settings-hint">Press your desired key combination (e.g., Ctrl+Shift+A). Escape to cancel.</div>}
+                <div className="settings-hint" style={{ marginTop: '12px', color: '#f59e0b' }}>
+                  ⚠️ Setting a custom hotkey will completely override F2. Only your configured key will toggle the overlay.
+                </div>
               </div>
             )}
 
@@ -293,20 +505,7 @@ export const SettingsModal: React.FC = () => {
                     <span className="slider"></span>
                   </label>
                 </div>
-                <div className="settings-row">
-                  <div className="settings-label">
-                    <span>Opacity: {Math.round(safeOpacity * 100)}%</span>
-                    <span className="settings-desc">Adjust the window transparency.</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    className="mac-slider" 
-                    min="0.6" max="1.0" step="0.01" 
-                    value={safeOpacity} 
-                    onChange={(e) => setOpacity(parseFloat(e.target.value))} 
-                  />
-                </div>
-                <div className="settings-divider" />
+
                 <div className="settings-row">
                   <div className="settings-label">
                     <span>Reset Window Position</span>

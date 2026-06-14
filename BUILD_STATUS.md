@@ -37,11 +37,11 @@ NODE MODULES
 QUICK START OPTIONS
 ────────────────────────────────────────────────────────────────
 
-OPTION 1: F9 Hotkey (Easiest - Windows)
+OPTION 1: Hotkey (Easiest - Windows)
 ═══════════════════════════════════════════════════════════════
 1. Download AutoHotkey v2.0 from https://www.autohotkey.com/
-2. Double-click: C:\Users\jijin\hermes-overlay\f9-hotkey.ahk
-3. Press F9 anywhere to launch the overlay
+2. Double-click: C:\Users\jijin\hermes-overlay\hotkey.ahk
+3. Press the configured hotkey to launch the overlay
 
 OPTION 2: Direct Launch in Terminal
 ═══════════════════════════════════════════════════════════════
@@ -80,7 +80,7 @@ WHAT YOU'LL SEE
 KEYBOARD SHORTCUTS (In-App)
 ────────────────────────────────────────────────────────────────
 GLOBAL:
-  F9 ........................ Launch overlay (with AutoHotkey)
+  Hotkey (configured) ....... Launch overlay (with AutoHotkey)
   Ctrl+Alt+H ............... Toggle overlay visibility
 
 IN OVERLAY:
@@ -215,8 +215,8 @@ Configuration:
 
 Launchers:
 ├── launch.bat                  # Batch launcher
-├── f9-hotkey.ahk               # AutoHotkey F9 script
-└── f9-daemon.py                # Python daemon (backup)
+├── hotkey.ahk                  # AutoHotkey script (reconfigurable)
+└── [removed] f9-daemon.py      # Python daemon (removed - use AHK)
 
 Documentation:
 ├── README.md                   # Full architecture guide
@@ -276,7 +276,7 @@ TROUBLESHOOTING
 Problem: F9 doesn't work
 Solution: 
   • Install AutoHotkey v2.0 from https://www.autohotkey.com/
-  • Right-click f9-hotkey.ahk → Run Script
+  • Right-click hotkey.ahk → Run Script
   • Or use: npm run dev
 
 Problem: Overlay doesn't appear
@@ -304,7 +304,7 @@ READY TO LAUNCH?
 🚀 PICK ONE:
 
 1. F9 Hotkey:
-   Double-click → C:\Users\jijin\hermes-overlay\f9-hotkey.ahk
+   Double-click → C:\Users\jijin\hermes-overlay\hotkey.ahk
    Then press F9
 
 2. Terminal:
