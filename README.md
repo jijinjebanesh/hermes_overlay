@@ -1,101 +1,80 @@
-# Hermes Overlay - Over-engineered Tactical Neural Interface
+# Hermes Overlay
 
-This is a complete implementation of the Hermes desktop overlay redesigned as an over-engineered, feature-complete version using Electron + React + Tailwind + Framer Motion.
+**Apple-inspired tactical AI terminal for your desktop.**
 
-## Features Implemented
+Hermes Overlay is a sleek, highly customizable desktop assistant overlay built with Electron and React. Designed to be unobtrusive yet powerful, it provides a persistent, easily accessible interface for interacting with local or cloud AI models, seamlessly blending into your workflow with its transparent, glassmorphic aesthetics.
 
-- **Tactical Neural Interface Aesthetic**: Deep obsidian background, electric cyan accents, glassmorphism panels
-- **5-Zone Architecture**:
-  - Zone 1: Command Rail (vertical icon rail with drag-reorder)
-  - Zone 2: Context Panel (collapsible drawer with context awareness)
-  - Zone 3: Main Conversation Viewport (virtual scrolling, streaming tokens, tool cards)
-  - Zone 4: Intelligence Input Bar (dual-mode input, voice recording, attachments)
-  - Zone 5: System Sidebar (tabbed panels for Job Monitor, Memory Grid, Agent Swarm)
-- **Overlaying Systems**:
-  - Command Palette (Ctrl+P)
-  - Live Permission Ticker
-  - Security Overlay Layer
-  - Theming Engine
-  - Physics-based Window Management
-  - Performance Budget considerations
-  - Local Telemetry
+## 🚀 Key Features
 
-## Technology Stack
+- **Global Hotkey Access**: Instantly summon or hide the overlay from anywhere using customizable hotkeys (default: `Ctrl+Space`).
+- **Echo Mode (Voice Interface)**: A full-screen, immersive voice conversation surface. Features real-time Speech-to-Text (STT), Text-to-Speech (TTS), and a fluid, audio-reactive visualizer orb (Triggered via `Ctrl+Shift+E`).
+- **Drag-and-Drop Attachments**: Drop files (images, documents, code, etc.) directly onto the overlay to add them as context to your AI prompts.
+- **Dynamic Theming**: Support for automatic system Dark/Light mode switching, custom font families, and customizable accent colors.
+- **Floating & Resizable**: Smart window management that remembers your preferred position and size.
+- **Deep System Integration**: Built-in AutoHotkey (AHK) integration for robust global shortcut overrides on Windows.
 
-- Electron 30+ (contextIsolation: true, nodeIntegration: false)
-- React 18 + Vite
-- Framer Motion 11 for animations
-- Tailwind CSS v4 with custom design tokens
-- Zustand for state management
-- electron-store for persistent preferences
-- IPC with typed channels (simplified validation)
-- Placeholders for: Monaco Editor, D3.js, simplex-noise, Web Audio API
+## 🛠 Technology Stack
 
-## Project Structure
+- **Framework**: [Electron 30](https://www.electronjs.org/) for the desktop environment.
+- **Frontend**: [React 18](https://react.dev/) powered by [Vite](https://vitejs.dev/) for lightning-fast HMR and building.
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/) for utility-first, responsive design tokens.
+- **Animations**: [Framer Motion](https://www.framer.com/motion/) for fluid UI transitions and the Echo Mode orb physics.
+- **State Management**: [Zustand](https://github.com/pmndrs/zustand) for lightweight, predictable global state.
+- **Persistence**: `electron-store` for saving user preferences across sessions.
 
-```
+## 📂 Project Structure
+
+```text
 hermes-overlay/
-├── package.json
-├── vite.config.ts
-├── tailwind.config.cjs
-├── index.html
 ├── src/
-│   ├── main/
-│   │   └── main.ts          # Electron main process
-│   ├── preload/
-│   │   └── preload.ts       # Preload script with IPC bridge
-│   └── renderer/
-│       ├── App.tsx          # Main React app
-│       ├── main.tsx         # React entry point
-│       ├── components/      # All UI components
-│       │   ├── ZoneCommandRail.tsx
-│       │   ├── ZoneContext.tsx
-│       │   ├── ZoneConversation.tsx
-│       │   ├── ZoneInput.tsx
-│       │   ├── ZoneSystemSidebar.tsx
-│       │   ├── MessageBubble.tsx
-│       │   └── Tooltip.tsx
-│       └── store/           # Zustand stores
-│           └── index.ts
+│   ├── main/          # Electron Main Process (Window management, IPC routing, AHK bridging)
+│   ├── preload/       # Context Bridge for secure IPC communication
+│   ├── renderer/      # React Application Entry (App.tsx, main.tsx)
+│   ├── components/    # UI Components (InputBar, EchoMode, Conversation, SettingsModal, etc.)
+│   ├── store/         # Zustand State Management (overlayStore.ts)
+│   └── audio/         # Audio processing engine for Echo Mode visualization
+├── scripts/           # Python/Node scripts for backend bridging (optional)
+├── hotkey.ahk         # AutoHotkey daemon script for advanced shortcut listening
+├── package.json       # Project dependencies and scripts
+└── vite.config.ts     # Vite configuration for Electron renderer build
 ```
 
-## Getting Started
+## 💻 Getting Started
 
-1. Install dependencies:
+### Prerequisites
+- [Node.js](https://nodejs.org/) (v18 or higher recommended)
+- [AutoHotkey v2](https://www.autohotkey.com/) (Optional, but recommended for robust global shortcut capturing on Windows)
+
+### Installation
+
+1. Clone the repository and install dependencies:
    ```bash
    npm install
    ```
 
-2. Run in development mode:
+2. Start the development server (Vite + Electron):
    ```bash
-   npm run electron-dev
+   npm run dev
    ```
 
-3. Build for production:
+3. Build the application for production:
    ```bash
    npm run build
    ```
 
-## Global Hotkeys
+## ⌨️ Default Shortcuts
 
-- `Ctrl+Space`: Toggle overlay visibility
-- `Ctrl+Shift+Z`: Enter/Exit Zen mode (focus on conversation)
-- `Ctrl+Shift+M`: Enter/Exit Micro mode (compact input bar)
-- `Ctrl+P`: Open Command Palette (placeholder)
+- `Ctrl + Space`: Toggle Hermes Overlay visibility.
+- `Ctrl + Shift + E`: Enter **Echo Mode** for voice interactions.
+- `Escape`: Close settings or exit current mode.
 
-## Development Notes
+*(Note: Global shortcuts can be reconfigured within the application settings, which will automatically update the underlying AHK daemon).*
 
-The overlay is designed to be functional and highly extensible. All zones are collapsible/resizable, and the UI interactions are fully realized. Real implementations of Monaco Editor, audio processing, and other integrations are actively developed within the `src/` directory.
+## 🎨 Customization
 
-## Running the Application
+Hermes Overlay is built to be customized:
+- **UI Tweaks**: Update `tailwind.config.cjs` or `src/renderer/styles/index.css` to modify core design tokens.
+- **Behavior**: Adjust window bounds, frameless behavior, and IPC handling inside `src/main/main.ts`.
 
-1. Ensure any legacy Python overlay is not running.
-2. Start this Electron overlay using `npm run electron-dev`.
-3. The overlay will appear as a bottom-right floating window by default and can be toggled globally via `Ctrl+Space`.
-
-## Customization
-
-- Themes can be changed via the Zustand overlay store (currently implements obsidian theme).
-- Colors and design tokens are defined in `tailwind.config.cjs`.
-- Window behavior, system trays, and positioning are controlled in `src/main/main.ts`.
-- Persistent settings are stored via electron-store (accessible through IPC).
+---
+*Hermes Overlay — Designed for power users who demand intelligence at their fingertips.*
