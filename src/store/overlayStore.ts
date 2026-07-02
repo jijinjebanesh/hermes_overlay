@@ -97,6 +97,7 @@ interface OverlayState {
 
   // Settings State
   isSettingsOpen: boolean;
+  settingsSidebarCollapsed: boolean;
   launchAtStartup: boolean;
   globalHotkey: string;
   alwaysOnTop: boolean;
@@ -112,7 +113,7 @@ interface OverlayState {
   echoInterruptWords: string[];
   echoExitWords: string[];
   echoClapSensitivity: number;
-  echoTtsProvider: 'elevenlabs' | 'edge-tts' | 'openai';
+  echoTtsProvider: 'elevenlabs' | 'edge-tts' | 'openai' | 'qwen3';
   echoTtsVoice: string;
   echoWakeWordEnabled: boolean;
   echoWakeWord: string;
@@ -120,6 +121,7 @@ interface OverlayState {
 
   // Actions
   setSettingsOpen: (isOpen: boolean) => void;
+  setSettingsSidebarCollapsed: (collapsed: boolean) => void;
   setLaunchAtStartup: (enable: boolean) => void;
   setGlobalHotkey: (key: string) => void;
   setAlwaysOnTop: (always: boolean) => void;
@@ -133,7 +135,7 @@ interface OverlayState {
   setEchoExitWords: (words: string[]) => void;
   setEchoVoiceModeEnabled: (enabled: boolean) => void;
   setEchoClapSensitivity: (sensitivity: number) => void;
-  setEchoTtsProvider: (provider: 'elevenlabs' | 'edge-tts' | 'openai') => void;
+  setEchoTtsProvider: (provider: 'elevenlabs' | 'edge-tts' | 'openai' | 'qwen3') => void;
   setEchoTtsVoice: (voice: string) => void;
   setEchoWakeWordEnabled: (enabled: boolean) => void;
   setEchoWakeWord: (word: string) => void;
@@ -200,6 +202,7 @@ export const useOverlayStore = create<OverlayState>()(
 
       // Settings
       isSettingsOpen: false,
+      settingsSidebarCollapsed: false,
       launchAtStartup: false,
       globalHotkey: 'CommandOrControl+Alt+H',
       alwaysOnTop: true,
@@ -223,22 +226,23 @@ export const useOverlayStore = create<OverlayState>()(
       /* ── Actions ── */
 
       setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+      setSettingsSidebarCollapsed: (collapsed) => set({ settingsSidebarCollapsed: collapsed }),
       setLaunchAtStartup: (enable) => {
         set({ launchAtStartup: enable });
-        (window as any).electronAPI?.setLaunchAtStartup(enable);
+        window.electronAPI?.setLaunchAtStartup(enable);
       },
       setGlobalHotkey: (hotkey) => {
         set({ globalHotkey: hotkey });
-        (window as any).electronAPI?.setGlobalHotkey(hotkey);
+        window.electronAPI?.setGlobalHotkey(hotkey);
       },
       setAlwaysOnTop: (enable) => {
         set({ alwaysOnTop: enable });
-        (window as any).electronAPI?.setAlwaysOnTop(enable);
+        window.electronAPI?.setAlwaysOnTop(enable);
       },
 
       setSmallWindow: (enable) => {
         set({ smallWindow: enable });
-        (window as any).electronAPI?.setSmallWindow(enable);
+        window.electronAPI?.setSmallWindow(enable);
       },
       setTheme: (theme) => set({ theme }),
       setAccentColor: (accentColor) => set({ accentColor }),
@@ -322,12 +326,9 @@ export const useOverlayStore = create<OverlayState>()(
           };
         }),
 
-      setEchoClapWakeEnabled: (enabled) =>
-        set((state) => ({ ...state, echoClapWakeEnabled: enabled })),
-      setEchoInterruptWords: (words) =>
-        set((state) => ({ ...state, echoInterruptWords: words })),
-      setEchoExitWords: (words) =>
-        set((state) => ({ ...state, echoExitWords: words })),
+      setEchoClapWakeEnabled: (enabled) => set({ echoClapWakeEnabled: enabled }),
+      setEchoInterruptWords: (words) => set({ echoInterruptWords: words }),
+      setEchoExitWords: (words) => set({ echoExitWords: words }),
 
       addPendingAttachments: (files) =>
         set((state) => ({
@@ -341,26 +342,19 @@ export const useOverlayStore = create<OverlayState>()(
       
       clearPendingAttachments: () => set({ pendingAttachments: [] }),
 
-      setEchoVoiceModeEnabled: (enabled) =>
-        set((state) => ({ ...state, echoVoiceModeEnabled: enabled })),
+      setEchoVoiceModeEnabled: (enabled) => set({ echoVoiceModeEnabled: enabled }),
       
-      setEchoClapSensitivity: (sensitivity) =>
-        set((state) => ({ ...state, echoClapSensitivity: sensitivity })),
+      setEchoClapSensitivity: (sensitivity) => set({ echoClapSensitivity: sensitivity }),
       
-      setEchoTtsProvider: (provider) =>
-        set((state) => ({ ...state, echoTtsProvider: provider })),
+      setEchoTtsProvider: (provider) => set({ echoTtsProvider: provider }),
       
-      setEchoTtsVoice: (voice) =>
-        set((state) => ({ ...state, echoTtsVoice: voice })),
+      setEchoTtsVoice: (voice) => set({ echoTtsVoice: voice }),
         
-      setEchoWakeWordEnabled: (enabled) =>
-        set((state) => ({ ...state, echoWakeWordEnabled: enabled })),
+      setEchoWakeWordEnabled: (enabled) => set({ echoWakeWordEnabled: enabled }),
         
-      setEchoWakeWord: (word) =>
-        set((state) => ({ ...state, echoWakeWord: word })),
+      setEchoWakeWord: (word) => set({ echoWakeWord: word }),
         
-      setEchoDoubleClapMinimize: (enabled) =>
-        set((state) => ({ ...state, echoDoubleClapMinimize: enabled })),
+      setEchoDoubleClapMinimize: (enabled) => set({ echoDoubleClapMinimize: enabled }),
     }),
     {
       name: 'hermes-overlay-storage',

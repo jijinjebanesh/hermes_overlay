@@ -1,4 +1,5 @@
 import { useOverlayStore } from '../store/overlayStore';
+import '../types/electron-api.d';
 
 export type EchoState =
   | 'initializing'   // Mic permission check, first 800ms
@@ -285,7 +286,7 @@ export class EchoEngine {
     const uint8Array = new Uint8Array(arrayBuffer);
 
     try {
-      const transcript = await (window as any).electronAPI.transcribeAudio(uint8Array);
+      const transcript = await window.electronAPI.transcribeAudio(uint8Array);
 
       if (!transcript || transcript.trim().length < 2) {
         this.startListening();
@@ -325,7 +326,7 @@ export class EchoEngine {
         setTimeout(() => reject(new Error('Timeout')), 60000);
       });
       
-      const responsePromise = (window as any).electronAPI.echoSendMessage({ text });
+      const responsePromise = window.electronAPI.echoSendMessage({ text });
       const response = await Promise.race([responsePromise, timeoutPromise]);
       
       console.log('[EchoEngine] Agent response received:', response ? response.substring(0, 100) + '...' : 'NULL');
@@ -333,7 +334,7 @@ export class EchoEngine {
       if (!response || response.trim().length === 0) {
         console.warn('[EchoEngine] Empty response, retrying once...');
         await this.delay(500);
-        const retryResponse = await (window as any).electronAPI.echoSendMessage({ text });
+        const retryResponse = await window.electronAPI.echoSendMessage({ text });
         
         if (!retryResponse || retryResponse.trim().length === 0) {
           this.callbacks.onStateChange('listening');
@@ -378,12 +379,13 @@ export class EchoEngine {
     this.startInterruptWatcher();
 
     const voice = useOverlayStore.getState().echoTtsVoice;
+    const provider = useOverlayStore.getState().echoTtsProvider;
 
     // Fire off all chunk synthesis requests in parallel
     const synthesizePromises = chunks.map(async (chunkText) => {
       if (this.ttsCancelled || this.isDestroyed) return null;
       try {
-        const audioArray: number[] = await (window as any).electronAPI.synthesizeSpeech({ text: chunkText, voice });
+        const audioArray: number[] = await window.electronAPI.synthesizeSpeech({ text: chunkText, voice, provider });
         if (!audioArray || audioArray.length === 0) return null;
         const audioBuffer = new Uint8Array(audioArray).buffer;
         const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });

@@ -43,7 +43,7 @@ export const WakeWordListener: React.FC = () => {
             const target = phrase.trim().toLowerCase().replace(/[.,!?]/g, '');
             if (transcript.includes(target)) {
               console.log('[WakeWordListener] Wake phrase detected! Triggering echo mode.');
-              (window as any).electronAPI?.triggerWakeWord?.();
+              window.electronAPI?.triggerWakeWord?.();
               return;
             }
           }

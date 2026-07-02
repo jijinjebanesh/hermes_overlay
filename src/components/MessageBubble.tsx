@@ -1,275 +1,35 @@
 import React, { useState } from 'react';
-import { Message, ToolCall, StreamSegment } from '../store/overlayStore';
-import { ChevronRight, ChevronDown, Terminal, PenLine, Search, Globe, Zap, FileText, Cpu, Paperclip } from 'lucide-react';
+import { Copy, RotateCw, Edit2, Check } from 'lucide-react';
+import { Message } from '../store/overlayStore';
 import { AttachmentChip } from './AttachmentChip';
+import { CodeBlock } from './message/CodeBlock';
+import { DiffBlock } from './message/DiffBlock';
+import { ToolActivityPill } from './message/ToolActivityPill';
+import { ThinkingBlock } from './message/ThinkingBlock';
+import { ToolCallBlock } from './message/ToolCallBlock';
 
 interface MessageBubbleProps {
   message: Message;
+  onRetry?: () => void;
+  onEdit?: () => void;
 }
 
-
-/* ════════════════════════════════════════════════
-   CODE BLOCK — with one-click copy button
-   ════════════════════════════════════════════════ */
-
-const CodeBlock: React.FC<{ code: string; language?: string }> = ({ code, language }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRetry, onEdit }) => {
   const [copied, setCopied] = useState(false);
-  
-  // Default collapse terminal output
-  const isTerminal = language === 'bash' || language === 'shell' || language === 'sh' || language === 'terminal';
-  const [expanded, setExpanded] = useState(!isTerminal);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {
-      const ta = document.createElement('textarea');
-      ta.value = code;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
-  // Minimal 3-colour syntax highlighter
-  const highlight = (text: string) => {
-    return text.split('\n').map((line, i) => {
-      let html = line
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/(\/\/.*$)/gm, '<span class="token comment">$1</span>')
-        .replace(/(#.*$)/gm, '<span class="token comment">$1</span>')
-        .replace(/(['"`])(.*?)\1/g, '<span class="token string">$1$2$1</span>')
-        .replace(
-          /\b(import|from|export|const|let|var|function|return|if|else|for|while|class|switch|case|break|default|new|this|typeof|instanceof|async|await|try|catch|throw|finally|yield|void|delete|in|of|def|print|True|False|None)\\b/g,
-          '<span class="token keyword">$1</span>'
-        );
-
-      return <div key={i} dangerouslySetInnerHTML={{ __html: html || ' ' }} />;
-    });
-  };
-
-  if (isTerminal) {
-    return (
-      <div className="diff-block">
-        <button
-          className="diff-block-header"
-          onClick={() => setExpanded(!expanded)}
-          style={{ justifyContent: 'flex-start' }}
-        >
-          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          <Terminal size={12} />
-          <span className="diff-block-title" style={{ marginLeft: 6 }}>
-            {expanded ? '🔧 Terminal output' : '🔧 Ran terminal command — click to expand'}
-          </span>
-        </button>
-        {expanded && (
-          <div className="code-block" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTop: 'none', margin: 0 }}>
-            <div className="code-block-header">
-              {language && <span className="code-block-lang">{language}</span>}
-              <button
-                className={`code-copy-btn${copied ? ' copied' : ''}`}
-                onClick={handleCopy}
-              >
-                {copied ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-            <div className="code-block-content selectable">
-              {highlight(code)}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="code-block">
-      <div className="code-block-header">
-        {language && <span className="code-block-lang">{language}</span>}
-        <button
-          className={`code-copy-btn${copied ? ' copied' : ''}`}
-          onClick={handleCopy}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      <div className="code-block-content selectable">
-        {highlight(code)}
-      </div>
-    </div>
-  );
-};
-
-
-/* ════════════════════════════════════════════════
-   DIFF BLOCK — shows file diffs with color coding
-   ════════════════════════════════════════════════ */
-
-const DiffBlock: React.FC<{ content: string }> = ({ content }) => {
-  const [expanded, setExpanded] = useState(false);
-  const lines = content.split('\n');
-  const firstLine = lines[0] || 'File diff';
-
-  return (
-    <div className="diff-block">
-      <button
-        className="diff-block-header"
-        onClick={() => setExpanded(!expanded)}
-      >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <FileText size={12} />
-        <span className="diff-block-title">{firstLine}</span>
-      </button>
-      {expanded && (
-        <div className="diff-block-content selectable">
-          {lines.slice(1).map((line, i) => {
-            let cls = 'diff-line';
-            if (line.startsWith('+')) cls += ' diff-add';
-            else if (line.startsWith('-')) cls += ' diff-remove';
-            else if (line.startsWith('@@')) cls += ' diff-range';
-            return <div key={i} className={cls}>{line || ' '}</div>;
-          })}
-        </div>
-      )}
-    </div>
-  );
-};
-
-
-/* ════════════════════════════════════════════════
-   TOOL ACTIVITY PILL — shows hermes tool actions
-   Like terminal output:
-     💻 preparing terminal…
-     ✍️ preparing write_file…
-   ════════════════════════════════════════════════ */
-
-const getToolIcon = (content: string) => {
-  if (content.includes('terminal')) return <Terminal size={12} />;
-  if (content.includes('write_file') || content.includes('edit_file')) return <PenLine size={12} />;
-  if (content.includes('search') || content.includes('find')) return <Search size={12} />;
-  if (content.includes('web') || content.includes('browse')) return <Globe size={12} />;
-  return <Zap size={12} />;
-};
-
-const ToolActivityPill: React.FC<{ segment: StreamSegment }> = ({ segment }) => {
-  return (
-    <div className="tool-activity-pill">
-      <span className="tool-activity-icon">{getToolIcon(segment.content)}</span>
-      <span className="tool-activity-text">{segment.content}</span>
-    </div>
-  );
-};
-
-
-/* ════════════════════════════════════════════════
-   THINKING BLOCK — collapsible reasoning section
-   Shows hermes' internal reasoning/planning
-   ════════════════════════════════════════════════ */
-
-const ThinkingBlock: React.FC<{ content: string }> = ({ content }) => {
-  const [expanded, setExpanded] = useState(false);
-  const lines = content.split('\n');
-  const preview = lines.slice(0, 2).join(' ').substring(0, 80);
-
-  return (
-    <div className="thinking-block">
-      <button
-        className="thinking-block-header"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <Cpu size={12} />
-        {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        <span className="thinking-block-label">Thinking</span>
-        {!expanded && (
-          <span className="thinking-block-preview">{preview}…</span>
-        )}
-      </button>
-      {expanded && (
-        <div className="thinking-block-content selectable">
-          {content}
-        </div>
-      )}
-    </div>
-  );
-};
-
-
-/* ════════════════════════════════════════════════
-   TOOL CALL PILL — from store toolCalls
-   ════════════════════════════════════════════════ */
-
-const ToolCallBlock: React.FC<{ tool: ToolCall }> = ({ tool }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  // Parse tool.command if it's a JSON string (from older Hermes versions)
-  let displayCommand = tool.command || '';
-  try {
-    if (displayCommand.startsWith('{') && displayCommand.endsWith('}')) {
-      const parsed = JSON.parse(displayCommand);
-      // For terminal: extract the actual command
-      if (tool.name === 'terminal' && parsed.command) {
-        displayCommand = parsed.command;
-      }
-      // For write_file: show filename or summary
-      else if (tool.name === 'write_file') {
-        if (parsed.path) {
-          displayCommand = `📁 ${parsed.path}`;
-        } else if (parsed.content) {
-          const lines = parsed.content.split('\n');
-          displayCommand = `📝 ${lines[0]?.slice(0, 50) || 'file content'}${lines.length > 1 ? '...' : ''}`;
-        }
-      }
-      // For other tools: show first key or JSON summary
-      else {
-        const keys = Object.keys(parsed);
-        displayCommand = keys.length > 0 ? `${keys[0]}: ${JSON.stringify(parsed[keys[0]]).slice(0, 50)}` : displayCommand;
-      }
+  const handleCopyText = () => {
+    let textToCopy = message.content || '';
+    if (!textToCopy && message.segments) {
+      const textSegments = message.segments.filter(s => s.type === 'text');
+      textToCopy = textSegments.map(s => s.content).join('\n\n');
     }
-  } catch (e) {
-    // If parsing fails, show original
-  }
 
-  const statusClass = tool.status === 'error'
-    ? 'status-error'
-    : tool.status === 'success'
-      ? 'status-success'
-      : 'status-pending';
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
-  return (
-    <div>
-      <button
-        className={`tool-pill ${statusClass}`}
-        onClick={() => setExpanded(!expanded)}
-      >
-        <span className="tool-pill-chevron">{expanded ? '▼' : '▶'}</span>
-        {tool.name} · {displayCommand}
-      </button>
-
-      <div className={`tool-output ${expanded ? 'expanded' : 'collapsed'}`}>
-        <div className="tool-output-content selectable">
-          {tool.output || 'Running…'}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-
-/* ════════════════════════════════════════════════
-   MESSAGE BUBBLE
-   User: right-aligned blue bubble
-   Assistant: left-aligned, renders segments
-   ════════════════════════════════════════════════ */
-
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   // Parse content: extract ```code blocks``` from text
   const renderTextContent = (content: string) => {
     if (!content) return null;
@@ -297,6 +57,36 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     });
   };
 
+  const renderMessageActions = () => (
+    <div className="message-actions-toolbar">
+      <button 
+        className="message-action-btn" 
+        onClick={handleCopyText} 
+        title="Copy text"
+      >
+        {copied ? <Check size={12} /> : <Copy size={12} />}
+      </button>
+      {onEdit && message.role === 'user' && (
+        <button 
+          className="message-action-btn" 
+          onClick={onEdit} 
+          title="Edit message"
+        >
+          <Edit2 size={12} />
+        </button>
+      )}
+      {onRetry && message.role === 'assistant' && (
+        <button 
+          className="message-action-btn" 
+          onClick={onRetry} 
+          title="Retry response"
+        >
+          <RotateCw size={12} />
+        </button>
+      )}
+    </div>
+  );
+
   // ── USER MESSAGE ──
   if (message.role === 'user') {
     return (
@@ -310,6 +100,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
             </div>
           )}
           {message.content}
+          
+          <div className="message-actions-container">
+            {renderMessageActions()}
+          </div>
         </div>
         <div className="message-timestamp">
           {new Date(message.timestamp).toLocaleTimeString([], {
@@ -325,7 +119,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const hasSegments = message.segments && message.segments.length > 0;
 
   return (
-    <div className="message-row" style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+    <div className="message-row" style={{ display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}>
       {/* Render structured segments if available */}
       {hasSegments && message.segments!.map((seg, idx) => {
         switch (seg.type) {
@@ -360,6 +154,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
       {message.toolCalls && message.toolCalls.map((tool) => (
         <ToolCallBlock key={tool.id} tool={tool} />
       ))}
+      
+      {!message.isStreaming && (
+        <div className="message-actions-container-assistant">
+          {renderMessageActions()}
+        </div>
+      )}
     </div>
   );
 };

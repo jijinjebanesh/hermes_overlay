@@ -75,7 +75,7 @@ export interface ElectronAPI {
 
   // Echo Mode
   transcribeAudio: (buffer: Uint8Array) => Promise<string>;
-  synthesizeSpeech: (payload: { text: string, voice?: string }) => Promise<number[]>;
+  synthesizeSpeech: (payload: { text: string, voice?: string, provider?: string }) => Promise<number[]>;
   echoSendMessage: (payload: { text: string }) => Promise<string>;
   triggerEchoMode: () => void;
   triggerWakeWord: () => void;
@@ -127,7 +127,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Echo Mode
   transcribeAudio: (buffer: Uint8Array) => ipcRenderer.invoke('transcribe-audio', buffer),
-  synthesizeSpeech: (payload: { text: string, voice?: string }) => ipcRenderer.invoke('synthesize-speech', payload),
+  synthesizeSpeech: (payload: { text: string, voice?: string, provider?: string }) => ipcRenderer.invoke('synthesize-speech', payload),
   echoSendMessage: (payload: { text: string }) => ipcRenderer.invoke('echo-send-message', payload),
   triggerEchoMode: () => ipcRenderer.send('trigger-echo-mode'),
   triggerWakeWord: () => ipcRenderer.send('trigger-wake-word'),

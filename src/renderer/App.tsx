@@ -6,8 +6,11 @@ import { SettingsModal } from '../components/SettingsModal';
 import { useOverlayStore } from '../store/overlayStore';
 import type { StreamSegment } from '../store/overlayStore';
 import { EchoMode } from '../components/EchoMode';
-import type { EchoSessionTurn } from '../components/EchoMode';
+import type { EchoSessionTurn } from '../hooks/useEchoSession';
 import { WakeWordListener } from '../components/WakeWordListener';
+import { ErrorBoundary } from '../components/ErrorBoundary';
+import { ToastContainer } from '../components/ui/Toast';
+import { getElectronAPI } from '../hooks/useElectronAPI';
 
 /**
  * Root component. Renders the three-section layout:
@@ -17,7 +20,7 @@ import { WakeWordListener } from '../components/WakeWordListener';
  * segment streaming, and focus events from main process.
  */
 
-const api = (window as any).electronAPI as any;
+const api = getElectronAPI();
 
 export const App: React.FC = () => {
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -85,7 +88,7 @@ export const App: React.FC = () => {
     if (!api?.getInventory) return;
     setInventoryLoading(true);
     api.getInventory()
-      .then((payload: any) => {
+      .then((payload) => {
         if (payload?.providers) {
           setInventory(payload.providers);
           const state = useOverlayStore.getState();
@@ -263,10 +266,10 @@ export const App: React.FC = () => {
       if (!isSupported) return null;
 
       const filePath = (file as any).path || '';
-      if (!filePath) return null;
+      if (!filePath || !api) return null;
 
       try {
-        const result = await (window as any).electronAPI.readDroppedFile(filePath);
+        const result = await api.readDroppedFile(filePath);
         return {
           ...result,
           id: crypto.randomUUID?.() || Math.random().toString(36).substring(2)
@@ -328,57 +331,59 @@ export const App: React.FC = () => {
   const showDragOverlay = isDragging;
   const shellClasses = [
     'overlay-shell',
-    useOverlayStore().smallWindow ? 'small-mode' : '',
+    useOverlayStore.getState().smallWindow ? 'small-mode' : '',
     !isVisible ? 'hidden' : '',
     echoTransitioning ? 'echo-dissolve' : '',
   ].filter(Boolean).join(' ');
 
   return (
-    <>
-      <div 
-        className={shellClasses}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        style={{
-          ...(echoTransitioning && !isEchoMode ? {
-            opacity: 0,
-            transform: 'translateY(-8px)',
-            transition: 'opacity 200ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1)',
-          } : echoTransitioning ? {
-            opacity: 0,
-            transform: 'translateY(-8px)',
-            pointerEvents: 'none' as const,
-            transition: 'opacity 200ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1)',
-          } : {})
-        }}
-      >
-        {showDragOverlay && (
-          <div className="global-drag-overlay">
-            <div className="global-drag-content">
-              <div className="global-drag-icon">📁</div>
-              <h2>Drop file to attach</h2>
-              <p>Images, documents, code, and more</p>
+    <ErrorBoundary>
+      <ToastContainer>
+        <div 
+          className={shellClasses}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          style={{
+            ...(echoTransitioning && !isEchoMode ? {
+              opacity: 0,
+              transform: 'translateY(-8px)',
+              transition: 'opacity 200ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1)',
+            } : echoTransitioning ? {
+              opacity: 0,
+              transform: 'translateY(-8px)',
+              pointerEvents: 'none' as const,
+              transition: 'opacity 200ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1)',
+            } : {})
+          }}
+        >
+          {showDragOverlay && (
+            <div className="global-drag-overlay">
+              <div className="global-drag-content">
+                <div className="global-drag-icon">📁</div>
+                <h2>Drop file to attach</h2>
+                <p>Images, documents, code, and more</p>
+              </div>
             </div>
-          </div>
+          )}
+          <Header />
+          <Conversation />
+          <InputBar inputRef={inputRef} />
+        </div>
+        
+        {/* Settings Modal Layer */}
+        <SettingsModal />
+
+        {/* Echo Mode Layer */}
+        {isEchoMode && (
+          <EchoMode onExit={handleEchoExit} />
         )}
-        <Header />
-        <Conversation />
-        <InputBar inputRef={inputRef} />
-      </div>
-      
-      {/* Settings Modal Layer */}
-      <SettingsModal />
 
-      {/* Echo Mode Layer */}
-      {isEchoMode && (
-        <EchoMode onExit={handleEchoExit} />
-      )}
-
-      {/* Global Wake Word Listener */}
-      <WakeWordListener />
-    </>
+        {/* Global Wake Word Listener */}
+        <WakeWordListener />
+      </ToastContainer>
+    </ErrorBoundary>
   );
 };
 

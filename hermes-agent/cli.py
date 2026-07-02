@@ -36,12 +36,50 @@ def transcribe_audio(file_path: str) -> str:
         sys.exit(1)
 
 
-def synthesize_speech(text: str, voice: str = "en-US-AriaNeural") -> None:
+def synthesize_speech(text: str, voice: str = "en-US-AriaNeural", provider: str = "edge-tts") -> None:
     """Synthesize speech and write binary audio to stdout.buffer.
     
     Uses edge-tts as the default provider (free, no API key required).
     Falls back to a simple beep if edge-tts is not available.
     """
+    if provider == "qwen3":
+        try:
+            import urllib.request
+            import json
+            api_key = os.getenv("DASHSCOPE_API_KEY", os.getenv("OPENAI_API_KEY"))
+            if not api_key:
+                print("Error: DASHSCOPE_API_KEY environment variable not set.", file=sys.stderr)
+                sys.exit(1)
+            
+            url = "https://dashscope.aliyuncs.com/compatible-mode/v1/audio/speech"
+            
+            if not voice or voice == "en-US-AriaNeural":
+                voice = "longxiaochun"
+                
+            data = {
+                "model": "cosyvoice-v1",
+                "input": text,
+                "voice": voice,
+                "response_format": "mp3"
+            }
+            
+            req = urllib.request.Request(
+                url, 
+                data=json.dumps(data).encode('utf-8'),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+            )
+            with urllib.request.urlopen(req) as response:
+                sys.stdout.buffer.write(response.read())
+                sys.stdout.buffer.flush()
+            return
+        except Exception as e:
+            print(f"Error in Qwen3 TTS synthesis: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Default edge-tts fallback
     try:
         import asyncio
         import edge_tts
@@ -130,6 +168,12 @@ def main():
     )
     
     parser.add_argument(
+        '--provider',
+        default='edge-tts',
+        help='TTS provider to use (default: edge-tts)'
+    )
+    
+    parser.add_argument(
         '--model',
         default='base',
         help='Whisper model to use for transcription (default: base)'
@@ -145,7 +189,7 @@ def main():
     
     # Handle --tts
     if args.tts:
-        synthesize_speech(args.tts, args.voice)
+        synthesize_speech(args.tts, args.voice, args.provider)
         sys.exit(0)
     
     # No valid flag provided

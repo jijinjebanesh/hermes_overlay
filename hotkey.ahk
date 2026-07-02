@@ -5,6 +5,7 @@
 
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+#NoTrayIcon
 Persistent
 
 overlayDir := "C:\Users\jijin\hermes-overlay"
@@ -49,7 +50,6 @@ f4:: {
             }
         }
     } else {
-        ToolTip("🚀 Launching Hermes...", 10, 10)
         windowVisible := false
         try {
             Run(electronExe . " " . scriptPath, overlayDir)
@@ -65,7 +65,6 @@ f4:: {
                         req.Open("POST", "http://localhost:34567/show", false)
                         req.Send()
                         windowVisible := true
-                        SetTimer(() => ToolTip(), -1) ; Immediately hide any existing ToolTip
                     } catch {
                         WinShow("ahk_id " hwnd)
                         WinActivate("ahk_id " hwnd)
@@ -74,7 +73,6 @@ f4:: {
                     break
                 }
                 if (A_TickCount - startTime > 5000) {
-                    ToolTip("❌ Launch timeout", 10, 10)
                     break
                 }
             }
@@ -82,18 +80,11 @@ f4:: {
             MsgBox("Error launching Hermes: " e.Message, "Error", "T2")
         }
     }
-    
-    SetTimer(() => ToolTip(), -1500)
 }
 
 ^!+f4:: {
-    ToolTip("🛑 Force Closing Hermes...", 10, 10)
-    SetTimer(() => ToolTip(), -1000)
     try {
         ProcessClose("electron.exe")
     }
 }
 
-ToolTip("F4 Daemon Active — Press F4 to toggle Hermes", 10, 10)
-
-SetTimer(() => ToolTip(), -3000)

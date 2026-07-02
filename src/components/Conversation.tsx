@@ -1,20 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { Sparkles, ArrowDown } from 'lucide-react';
 import { useOverlayStore } from '../store/overlayStore';
 import { MessageBubble } from './MessageBubble';
-
-/**
- * CONVERSATION — flex-grow, overflow-y: auto.
- *
- * Zero height when empty (no messages) — overlay becomes
- * just header + input bar (compact ~96px launcher).
- *
- * Auto-scrolls to bottom on new content. Pauses when user
- * scrolls up manually. Shows "↓ New message" pill when
- * paused and new content arrives.
- *
- * Streaming cursor (|) and status line shown on last
- * assistant message during active stream.
- */
+import { EmptyState } from './ui/EmptyState';
+import { IconButton } from './ui/IconButton';
 
 export const Conversation: React.FC = () => {
   const { messages, streamState } = useOverlayStore();
@@ -23,7 +13,7 @@ export const Conversation: React.FC = () => {
   const [showNewMsg, setShowNewMsg] = useState(false);
   const prevMsgCount = useRef(messages.length);
 
-  // ── Scroll detection ──
+  // Scroll detection
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -39,7 +29,7 @@ export const Conversation: React.FC = () => {
     return () => el.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  // ── Auto-scroll + new message detection ──
+  // Auto-scroll + new message detection
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -57,23 +47,45 @@ export const Conversation: React.FC = () => {
     setShowNewMsg(false);
   };
 
-  // ── Empty state: push input bar to bottom ──
-  if (messages.length === 0) {
-    return <div className="conversation" />;
-  }
+  // Group messages by date for separators
+  const renderMessages = () => {
+    let lastDateStr = '';
 
-  return (
-    <div className="conversation">
-      <div ref={scrollRef} className="conversation-scroll">
-        {messages.map((msg, idx) => (
-          <div key={msg.id || idx} className="message-row">
+    return messages.map((msg, idx) => {
+      const msgDate = new Date(msg.timestamp);
+      const dateStr = msgDate.toLocaleDateString(undefined, { 
+        weekday: 'long', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+      
+      const showDateSeparator = dateStr !== lastDateStr;
+      if (showDateSeparator) {
+        lastDateStr = dateStr;
+      }
+
+      // Check if this is the active streaming message
+      const isLastAssistantMessage = idx === messages.length - 1 && msg.role === 'assistant';
+      const isStreaming = isLastAssistantMessage && streamState.isStreaming && !msg.cancelled;
+
+      return (
+        <React.Fragment key={msg.id || idx}>
+          {showDateSeparator && (
+            <div className="date-separator">
+              <span className="date-separator-pill">{dateStr}</span>
+            </div>
+          )}
+          
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, type: 'spring', bounce: 0 }}
+            className="message-row"
+          >
             <MessageBubble message={msg} />
 
-            {/* Streaming cursor on last assistant message */}
-            {idx === messages.length - 1 &&
-              msg.role === 'assistant' &&
-              streamState.isStreaming &&
-              !msg.cancelled && (
+            {/* Streaming cursor and typing indicator */}
+            {isStreaming && (
               <div style={{
                 marginLeft: 12,
                 marginTop: 8,
@@ -81,21 +93,53 @@ export const Conversation: React.FC = () => {
                 display: 'flex',
                 flexDirection: 'column',
               }}>
-                <span className="stream-cursor" />
+                <div className="typing-indicator">
+                  <span className="typing-dot"></span>
+                  <span className="typing-dot"></span>
+                  <span className="typing-dot"></span>
+                </div>
                 <span className="stream-status">
                   {streamState.tokens} tokens · {streamState.mode || 'thinking'} · {streamState.duration}s
                 </span>
               </div>
             )}
-          </div>
-        ))}
+          </motion.div>
+        </React.Fragment>
+      );
+    });
+  };
+
+  // Empty state
+  if (messages.length === 0) {
+    return (
+      <div className="conversation conversation--empty">
+        <EmptyState
+          icon={<Sparkles size={32} style={{ color: 'var(--color-accent)' }} />}
+          title="How can I help you today?"
+          description="Ask me anything, or try using voice mode for a hands-free experience."
+          className="welcome-empty-state"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="conversation">
+      <div ref={scrollRef} className="conversation-scroll">
+        {renderMessages()}
       </div>
 
-      {/* ↓ New message pill */}
-      {showNewMsg && (
-        <button className="new-msg-pill" onClick={scrollToBottom}>
-          <span>↓</span> New message
-        </button>
+      {/* Floating scroll to bottom pill */}
+      {(!autoScroll || showNewMsg) && (
+        <div className="scroll-to-bottom-wrapper">
+          <button 
+            className={`scroll-to-bottom-btn ${showNewMsg ? 'has-new' : ''}`} 
+            onClick={scrollToBottom}
+          >
+            <ArrowDown size={14} />
+            {showNewMsg && <span className="scroll-new-badge" />}
+          </button>
+        </div>
       )}
     </div>
   );
