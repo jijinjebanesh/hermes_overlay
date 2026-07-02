@@ -19,12 +19,11 @@ const SETTINGS_TABS = [
 type SettingsTab = typeof SETTINGS_TABS[number]['id'];
 
 export const SettingsModal: React.FC = () => {
-  const { isSettingsOpen, setSettingsOpen, settingsSidebarCollapsed, setSettingsSidebarCollapsed } = useOverlayStore();
+  const { isSettingsOpen, setSettingsOpen } = useOverlayStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const activeMeta = SETTINGS_TABS.find((tab) => tab.id === activeTab) || SETTINGS_TABS[0];
 
   const handleClose = () => setSettingsOpen(false);
-  const toggleSidebar = () => setSettingsSidebarCollapsed(!settingsSidebarCollapsed);
 
   return (
     <AnimatePresence>
@@ -37,7 +36,7 @@ export const SettingsModal: React.FC = () => {
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className={`settings-modal ${settingsSidebarCollapsed ? 'sidebar-collapsed' : ''}`}
+            className="settings-modal sidebar-collapsed"
             onClick={(e) => e.stopPropagation()}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -57,28 +56,12 @@ export const SettingsModal: React.FC = () => {
                     key={tab.id}
                     className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
                     onClick={() => setActiveTab(tab.id)}
-                    title={settingsSidebarCollapsed ? `${tab.label} — ${tab.description}` : undefined}
+                    title={`${tab.label} — ${tab.description}`}
                   >
                     <span className="settings-tab-icon"><Icon size={15} /></span>
-                    {!settingsSidebarCollapsed && (
-                      <span className="settings-tab-copy">
-                        <strong>{tab.label}</strong>
-                        <small>{tab.description}</small>
-                      </span>
-                    )}
                   </button>
                 );
               })}
-
-              {/* Collapse toggle at bottom */}
-              <button
-                className="settings-sidebar-toggle"
-                onClick={toggleSidebar}
-                title={settingsSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                aria-label={settingsSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              >
-                {settingsSidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
-              </button>
             </div>
 
             <div className="settings-content">

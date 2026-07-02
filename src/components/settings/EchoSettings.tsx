@@ -135,7 +135,7 @@ export const EchoSettings: React.FC = () => {
           <span className="settings-desc">Choose which service generates voice responses.</span>
         </div>
         <select
-          className="mac-input"
+          className="mac-select"
           style={{ width: '100%', cursor: 'pointer' }}
           value={echoTtsProvider}
           onChange={(e) => setEchoTtsProvider(e.target.value as any)}
