@@ -83,7 +83,6 @@ export const ModelSelector: React.FC = () => {
         aria-expanded={isOpen}
       >
         <span className="model-pill-provider">{providerLabel}</span>
-        <span className="model-pill-separator">·</span>
         <span className="model-pill-model">{displayModel}</span>
         {inventoryLoading ? (
           <Loader2 size={10} className="model-pill-chevron spin" />

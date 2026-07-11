@@ -15,13 +15,17 @@
 
 import { app, BrowserWindow, globalShortcut, net, protocol } from 'electron';
 import { pathToFileURL } from 'url';
+import path from 'path';
+import fs from 'fs';
 import { loadOverlayConfig } from './config';
 import { createWindow, toggleVisibility, setIsQuitting, getMainWindow } from './window';
 import { createTray } from './tray';
 import { startHotkeyServer } from './hotkey-server';
 import { registerIpcHandlers } from './ipc-handlers';
 import { startClapDetector, stopClapDetector } from './clap-detector';
+import { stopWhisperDaemon } from './whisper-daemon';
 import { killActiveChild } from './hermes-cli';
+import { registerQuickActionsHotkey, unregisterQuickActionsHotkey } from './quick-actions';
 
 function registerLocalFileProtocol() {
   try {
@@ -31,6 +35,19 @@ function registerLocalFileProtocol() {
 
       if (!filePath) {
         return new Response('Missing file path', { status: 400 });
+      }
+
+      if (!path.isAbsolute(filePath)) {
+        return new Response('Path must be absolute', { status: 400 });
+      }
+
+      try {
+        const stats = fs.statSync(filePath);
+        if (!stats.isFile()) {
+          return new Response('Not a file', { status: 400 });
+        }
+      } catch (e) {
+        return new Response('File not found', { status: 404 });
       }
 
       return net.fetch(pathToFileURL(filePath).toString());
@@ -64,10 +81,11 @@ if (!gotTheLock) {
     createWindow();
     createTray(() => { setIsQuitting(true); app.quit(); });
     startClapDetector();
+
     startHotkeyServer();
     registerIpcHandlers();
 
-    // Register global hotkey
+    // Register global hotkey for overlay toggle
     const config = loadOverlayConfig();
     const triggerHotkey = config.triggerHotkey || 'F9';
     try {
@@ -82,6 +100,22 @@ if (!gotTheLock) {
         console.error('Failed to register fallback F9:', e2);
       }
     }
+
+    // Register Push-to-Talk hotkey (Ctrl+Space) for Echo Mode walkie-talkie
+    try {
+      globalShortcut.register('Control+Space', () => {
+        const win = getMainWindow();
+        if (!win) return;
+        // Send key-down to renderer — EchoEngine starts recording
+        win.webContents.send('push-to-talk-start');
+      });
+      console.log('✓ Registered Push-to-Talk hotkey: Ctrl+Space');
+    } catch (e) {
+      console.error('Failed to register Push-to-Talk:', e);
+    }
+
+    // Register Quick Actions hotkey (Ctrl+Shift+A) for floating toolbar
+    registerQuickActionsHotkey();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -103,6 +137,8 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  killActiveChild();
+  unregisterQuickActionsHotkey();
   stopClapDetector();
+  stopWhisperDaemon();
+  killActiveChild();
 });

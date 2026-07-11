@@ -2,6 +2,7 @@ import React from 'react';
 import { Check } from 'lucide-react';
 import { useOverlayStore } from '../../store/overlayStore';
 import { Toggle } from '../ui/Toggle';
+import { Slider } from '../ui/Slider';
 
 const EDGE_VOICES = [
   { id: 'en-US-AriaNeural', name: 'Aria', accent: 'US Female' },
@@ -34,7 +35,7 @@ export const EchoSettings: React.FC = () => {
         <h3 style={{ margin: 0, fontSize: 14 }}>Echo Mode Settings</h3>
         <span style={{ fontSize: 10, color: '#a78bfa', background: 'rgba(167, 139, 250, 0.1)', padding: '2px 8px', borderRadius: 4 }}>BETA</span>
       </div>
-      
+
       <div className="settings-row">
         <div className="settings-label">
           <span>Double-Clap to Wake</span>
@@ -45,8 +46,8 @@ export const EchoSettings: React.FC = () => {
       <div className="settings-divider" />
       <div className="settings-row">
         <div className="settings-label">
-           <span>Wake Word</span>
-           <span className="settings-desc">Activate Echo Mode when you say a specific word or phrase.</span>
+          <span>Wake Word</span>
+          <span className="settings-desc">Activate Echo Mode when you say a specific word or phrase.</span>
         </div>
         <Toggle checked={echoWakeWordEnabled} onChange={setEchoWakeWordEnabled} />
       </div>
@@ -56,11 +57,11 @@ export const EchoSettings: React.FC = () => {
             <span>Wake Phrase</span>
             <span className="settings-desc">The phrase to listen for (e.g. "hey hermes"). Needs internet.</span>
           </div>
-          <input 
-            type="text" 
-            className="mac-input" 
+          <input
+            type="text"
+            className="mac-input"
             style={{ width: '100%' }}
-            value={echoWakeWord} 
+            value={echoWakeWord}
             onChange={(e) => setEchoWakeWord(e.target.value)}
           />
         </div>
@@ -68,8 +69,8 @@ export const EchoSettings: React.FC = () => {
       <div className="settings-divider" />
       <div className="settings-row">
         <div className="settings-label">
-           <span>Double-Clap to Minimize</span>
-           <span className="settings-desc">Minimize the overlay instead of ignoring if you double clap while it's open.</span>
+          <span>Double-Clap to Minimize</span>
+          <span className="settings-desc">Minimize the overlay instead of ignoring if you double clap while it's open.</span>
         </div>
         <Toggle checked={echoDoubleClapMinimize} onChange={setEchoDoubleClapMinimize} />
       </div>
@@ -77,7 +78,7 @@ export const EchoSettings: React.FC = () => {
       <div className="settings-row">
         <div className="settings-label">
           <span>Voice Mode</span>
-          <span className="settings-desc">Keep microphone always-on for instant voice responses.</span>
+          <span className="settings-desc">Keep wake word listener always-on for instant "hey hermes" voice activation. Enables background mic listening.</span>
         </div>
         <Toggle checked={echoVoiceModeEnabled} onChange={setEchoVoiceModeEnabled} />
       </div>
@@ -87,18 +88,17 @@ export const EchoSettings: React.FC = () => {
           <span>Clap Sensitivity</span>
           <span className="settings-desc">Adjust detection threshold (lower = more sensitive).</span>
         </div>
-        <input
-          type="range"
-          min="0.1"
-          max="1.0"
-          step="0.1"
-          value={echoClapSensitivity}
-          onChange={(e) => setEchoClapSensitivity(parseFloat(e.target.value))}
-          style={{ width: 120 }}
-        />
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 30, textAlign: 'right' }}>
-          {echoClapSensitivity.toFixed(1)}
-        </span>
+        <div style={{ width: 150 }}>
+          <Slider
+            value={echoClapSensitivity}
+            onChange={setEchoClapSensitivity}
+            min={0.1}
+            max={1.0}
+            step={0.1}
+            showValue
+            valueFormatter={(v) => v.toFixed(1)}
+          />
+        </div>
       </div>
       <div className="settings-divider" />
       <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
@@ -106,11 +106,11 @@ export const EchoSettings: React.FC = () => {
           <span>Interrupt Words</span>
           <span className="settings-desc">Words that will stop Hermes from speaking (comma separated).</span>
         </div>
-        <input 
-          type="text" 
-          className="mac-input" 
+        <input
+          type="text"
+          className="mac-input"
           style={{ width: '100%' }}
-          value={echoInterruptWords.join(', ')} 
+          value={echoInterruptWords.join(', ')}
           onChange={(e) => setEchoInterruptWords(e.target.value.split(',').map(s => s.trim()))}
         />
       </div>
@@ -120,11 +120,11 @@ export const EchoSettings: React.FC = () => {
           <span>Exit Words</span>
           <span className="settings-desc">Words that will exit Echo Mode completely (comma separated).</span>
         </div>
-        <input 
-          type="text" 
-          className="mac-input" 
+        <input
+          type="text"
+          className="mac-input"
           style={{ width: '100%' }}
-          value={echoExitWords.join(', ')} 
+          value={echoExitWords.join(', ')}
           onChange={(e) => setEchoExitWords(e.target.value.split(',').map(s => s.trim()))}
         />
       </div>
@@ -152,7 +152,7 @@ export const EchoSettings: React.FC = () => {
           <span>TTS Voice</span>
           <span className="settings-desc">Select a curated natural voice for Hermes.</span>
         </div>
-        
+
         {echoTtsProvider === 'edge-tts' ? (
           <div className="voice-picker-list">
             {EDGE_VOICES.map((voice) => (

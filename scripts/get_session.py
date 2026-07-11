@@ -78,30 +78,51 @@ def strip_tool_calls_from_assistant_text(content: str) -> str:
     return result
 
 
-def format_content_like_streaming(content):
+def extract_segments(content):
     """
-    Apply the exact same formatting as the live streaming parser in main.ts.
-    This ensures loaded history matches live responses.
+    Apply the exact same formatting as the live streaming parser in main.ts,
+    but return an array of structured segments (text, diff, tool_activity)
+    so that resumed sessions render identical to live sessions.
     """
     if not content:
-        return content
+        return []
     
-    # 1. Remove ANSI escape sequences (matches main.ts line 1005)
+    # 1. Remove ANSI escape sequences
     clean_content = re.sub(r'[\u001b\u009b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]', '', content)
     
-    # 2. Process line by line like the streaming parser
     lines = clean_content.split('\n')
-    output_lines = []
+    segments = []
     
     in_box = False
     in_diff = False
     diff_buffer = []
     is_thinking_box = False
     
+    tool_buffer = []
+    tool_name = None
+    text_buffer = []
+
+    def flush_text():
+        if text_buffer:
+            text = '\n'.join(text_buffer).strip()
+            if text:
+                segments.append({"type": "text", "content": text})
+            text_buffer.clear()
+            
+    def flush_tool():
+        if tool_buffer:
+            text = '\n'.join(tool_buffer).strip()
+            if text:
+                seg = {"type": "tool_activity", "content": text}
+                if tool_name:
+                    seg["toolName"] = tool_name
+                segments.append(seg)
+            tool_buffer.clear()
+
     for line in lines:
         trimmed = line.strip()
         
-        # Skip metadata lines (matches main.ts lines 1055-1067)
+        # Skip metadata lines
         if (trimmed.startswith('Query:') or
             trimmed.startswith('Initializing agent') or
             re.match(r'^─+$', trimmed) or
@@ -114,68 +135,79 @@ def format_content_like_streaming(content):
             trimmed.startswith('↻') or
             re.match(r'Resumed session', trimmed)):
             continue
-        
-        # Handle diff blocks (matches main.ts lines 1073-1084)
+            
         if in_diff:
             if trimmed.startswith('\u256d\u2500') or (trimmed == '' and len(diff_buffer) > 0):
-                # End of diff block
-                output_lines.append('\n'.join(diff_buffer).strip())
+                flush_text()
+                segments.append({"type": "diff", "content": '\n'.join(diff_buffer).strip()})
                 in_diff = False
                 diff_buffer = []
             else:
                 diff_buffer.append(line)
             continue
-        
-        # Detect box start (matches main.ts lines 1087-1093)
+            
         if trimmed.startswith('\u256d\u2500'):
             in_box = True
             is_thinking_box = 'thinking' in trimmed.lower() or 'reasoning' in trimmed.lower()
             continue
-        
+            
         if re.match(r'^\u2500+\s+\u2695 Hermes', trimmed):
             in_box = True
             is_thinking_box = False
             continue
-        
-        # Detect box end (matches main.ts lines 1021-1036)
+            
         if in_box and trimmed.startswith('\u2570\u2500'):
             in_box = False
             continue
-        
-        # Handle box content - strip indentation (matches main.ts lines 1028, 1042, 1115)
+            
         if in_box:
-            # Strip 4-space indentation from box content
-            output_lines.append(re.sub(r'^    ', '', line))
+            flush_tool()
+            content_line = re.sub(r'^    ', '', line)
+            # Live parser creates 'thinking' segments for thinking boxes. We will just parse them as thinking here too.
+            if is_thinking_box:
+                # We can append it to text_buffer for now or handle it specially.
+                # Actually, reasoning is pulled from DB columns directly.
+                # Let's just treat it as text buffer to avoid dropping it if DB reasoning is missing.
+                # But to avoid double thinking blocks, if the DB reasoning exists, we should ignore this.
+                pass 
+            else:
+                text_buffer.append(content_line)
             continue
-        
-        # Handle tool activity lines (matches main.ts lines 1094-1110)
-        # Using unicode escapes for box-drawing characters
+            
+        # Tool activity
         if trimmed.startswith('\u250a') or re.match(r'^[\u2502\u250a]\s', trimmed):
             tool_match = re.match(r'[\u2502\u250a]\s*(?:\U0001f4bb|\u270d\ufe0f|\U0001f50d|\U0001f4c1|\U0001f310|\u26a1|\U0001f527|\U0001f4dd|\U0001f6e0\ufe0f|\u2699\ufe0f|\U0001f512)\s*(?:preparing\s+)?(.+?)\u2026?$', trimmed)
             if tool_match:
+                flush_text()
+                flush_tool()
+                tool_name = tool_match.group(1).strip()
                 content_text = re.sub(r'^[\u2502\u250a]\s*', '', trimmed)
-                output_lines.append(content_text)
+                tool_buffer.append(content_text)
             elif 'review diff' in trimmed:
+                flush_text()
+                flush_tool()
                 in_diff = True
                 diff_buffer = []
             else:
                 content_text = re.sub(r'^[\u2502\u250a]\s*', '', trimmed)
-                output_lines.append(content_text)
+                tool_buffer.append(content_text)
             continue
-        
-        # Regular content - strip 4-space indentation (matches main.ts line 1115)
+            
         if trimmed:
-            output_lines.append(re.sub(r'^    ', '', line))
-    
-    # Flush any remaining diff buffer
+            flush_tool()
+            text_buffer.append(re.sub(r'^    ', '', line))
+        else:
+            flush_tool()
+            text_buffer.append('')
+            
     if in_diff and diff_buffer:
-        output_lines.append('\n'.join(diff_buffer).strip())
+        flush_text()
+        segments.append({"type": "diff", "content": '\n'.join(diff_buffer).strip()})
     
-    # Rejoin and clean up excessive blank lines
-    result = '\n'.join(output_lines)
-    result = re.sub(r'\n{4,}', '\n\n\n', result)  # Max 3 consecutive newlines
+    flush_tool()
+    flush_text()
     
-    return result.strip()
+    return segments
 
 
 def main():
@@ -296,20 +328,15 @@ def main():
                 except:
                     pass
             
-            # Apply streaming parser formatting
-            log(f"Before formatting - role={role}, content_preview={content[:200] if content else 'empty'}")
-            content = format_content_like_streaming(content)
-            
             # Strip corrupted tool-call JSON blobs (from older Hermes versions)
             if role == 'assistant':
-                log(f"Stripping tool calls from assistant message...")
                 old_content = content
                 content = strip_tool_calls_from_assistant_text(content)
                 if old_content != content:
-                    log(f"Content was modified! Removed tool-call JSON blobs")
-                    log(f"New content preview: {content[:200] if content else 'empty'}")
-            
-            log(f"After formatting - content_preview={content[:200] if content else 'empty'}")
+                    pass
+
+            # Apply streaming parser formatting to extract segments
+            extracted_segments = extract_segments(content)
             
             reasoning = row['reasoning'] or row['reasoning_content']
             
@@ -323,17 +350,18 @@ def main():
                     "content": reasoning.strip()
                 })
             
-            # Add text content segment if present
-            if content and content.strip():
-                segments.append({
-                    "type": "text",
-                    "content": content
-                })
+            # Add extracted segments
+            segments.extend(extracted_segments)
+            
+            # The top-level content string should be the concatenation of all text segments,
+            # so it matches what live streaming does for fallback.
+            text_contents = [s['content'] for s in extracted_segments if s['type'] == 'text']
+            final_content = '\n\n'.join(text_contents)
             
             messages.append({
                 "id": f"{row['id']}_{row['timestamp']}" if row['timestamp'] else str(row['id']),
                 "role": role,
-                "content": content,
+                "content": final_content,
                 "timestamp": int(row['timestamp'] * 1000) if row['timestamp'] else 0,
                 "toolCalls": tool_calls,
                 "segments": segments,

@@ -1,62 +1,92 @@
 import React, { useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  ChevronDown,
+  FolderOpen,
+  Globe2,
+  PenLine,
+  Search,
+  Terminal,
+  Wrench,
+} from 'lucide-react';
 import { ToolCall } from '../../store/overlayStore';
+import { CodeBlock } from './CodeBlock';
 
 interface ToolCallBlockProps {
   tool: ToolCall;
 }
 
-export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ tool }) => {
-  const [expanded, setExpanded] = useState(false);
+const getToolVisual = (name: string) => {
+  const tool = name.toLowerCase();
+  if (tool.includes('terminal') || tool.includes('shell') || tool.includes('command')) return { Icon: Terminal, verb: 'Ran a command' };
+  if (tool.includes('search') || tool.includes('find') || tool.includes('grep')) return { Icon: Search, verb: 'Searched project files' };
+  if (tool.includes('web') || tool.includes('browser') || tool.includes('url')) return { Icon: Globe2, verb: 'Looked something up' };
+  if (tool.includes('write') || tool.includes('edit') || tool.includes('patch')) return { Icon: PenLine, verb: 'Updated a file' };
+  if (tool.includes('read') || tool.includes('file')) return { Icon: FolderOpen, verb: 'Read a file' };
+  return { Icon: Wrench, verb: 'Used a tool' };
+};
 
-  // Parse tool.command if it's a JSON string (from older Hermes versions)
-  let displayCommand = tool.command || '';
+const summarizeCommand = (tool: ToolCall): string => {
+  const raw = tool.command?.trim() || '';
+  if (!raw) return tool.name || 'Tool activity';
+
   try {
-    if (displayCommand.startsWith('{') && displayCommand.endsWith('}')) {
-      const parsed = JSON.parse(displayCommand);
-      // For terminal: extract the actual command
-      if (tool.name === 'terminal' && parsed.command) {
-        displayCommand = parsed.command;
-      }
-      // For write_file: show filename or summary
-      else if (tool.name === 'write_file') {
-        if (parsed.path) {
-          displayCommand = `📁 ${parsed.path}`;
-        } else if (parsed.content) {
-          const lines = parsed.content.split('\n');
-          displayCommand = `📝 ${lines[0]?.slice(0, 50) || 'file content'}${lines.length > 1 ? '...' : ''}`;
-        }
-      }
-      // For other tools: show first key or JSON summary
-      else {
-        const keys = Object.keys(parsed);
-        displayCommand = keys.length > 0 ? `${keys[0]}: ${JSON.stringify(parsed[keys[0]]).slice(0, 50)}` : displayCommand;
-      }
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed) {
+      const candidate = parsed.command || parsed.path || parsed.query || parsed.url || parsed.text;
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
     }
-  } catch (e) {
-    // If parsing fails, show original
+  } catch {
+    // The command is already a human-readable value.
   }
 
-  const statusClass = tool.status === 'error'
-    ? 'status-error'
-    : tool.status === 'success'
-      ? 'status-success'
-      : 'status-pending';
+  return raw.replace(/\s+/g, ' ').trim();
+};
+
+export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ tool }) => {
+  const [expanded, setExpanded] = useState(false);
+  const { Icon, verb } = getToolVisual(tool.name);
+  const summary = summarizeCommand(tool);
+  const status = tool.status || 'pending';
+  const detail = [
+    `Tool: ${tool.name || 'unknown'}`,
+    summary && `Request: ${summary}`,
+    tool.output && `Output:\n${tool.output}`,
+  ].filter(Boolean).join('\n\n');
+  const hasDetail = Boolean(detail);
 
   return (
-    <div>
+    <div className="tool-call-card">
       <button
-        className={`tool-pill ${statusClass}`}
-        onClick={() => setExpanded(!expanded)}
+        type="button"
+        className={`tool-call-pill tool-call-pill--${status}`}
+        onClick={() => hasDetail && setExpanded((value) => !value)}
+        aria-expanded={hasDetail ? expanded : undefined}
+        aria-label={`${expanded ? 'Hide' : 'Show'} details for ${tool.name || 'tool activity'}`}
       >
-        <span className="tool-pill-chevron">{expanded ? '▼' : '▶'}</span>
-        {tool.name} · {displayCommand}
+        <span className="tool-call-icon"><Icon size={14} strokeWidth={2.1} /></span>
+        <span className="tool-call-copy">
+          <span className="tool-call-verb">{verb}</span>
+          <span className="tool-call-summary">{summary}</span>
+        </span>
+        {hasDetail && (
+          <ChevronDown className={`tool-call-chevron${expanded ? ' is-expanded' : ''}`} size={14} />
+        )}
       </button>
 
-      <div className={`tool-output ${expanded ? 'expanded' : 'collapsed'}`}>
-        <div className="tool-output-content selectable">
-          {tool.output || 'Running…'}
-        </div>
-      </div>
+      <AnimatePresence initial={false}>
+        {expanded && hasDetail && (
+          <motion.div
+            className="tool-call-detail"
+            initial={{ height: 0, opacity: 0, y: -4 }}
+            animate={{ height: 'auto', opacity: 1, y: 0 }}
+            exit={{ height: 0, opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <CodeBlock code={detail} language="text" />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

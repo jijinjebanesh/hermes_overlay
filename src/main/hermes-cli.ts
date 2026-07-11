@@ -5,10 +5,50 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import { BrowserWindow } from 'electron';
-import { loadOverlayConfig } from './config';
+import { loadOverlayConfig, saveOverlayConfig } from './config';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
 
 let activeChild: ChildProcess | null = null;
 const sessionMap = new Map<string, string>();
+
+const sessionMapPath = path.join(os.homedir(), '.hermes', 'overlay_session_map.json');
+
+function loadSessionMap() {
+  try {
+    if (fs.existsSync(sessionMapPath)) {
+      const data = JSON.parse(fs.readFileSync(sessionMapPath, 'utf-8'));
+      for (const [key, value] of Object.entries(data)) {
+        sessionMap.set(key, value as string);
+      }
+    }
+  } catch (e) {
+    // Ignore — fresh start is fine
+  }
+}
+
+function saveSessionMap() {
+  try {
+    const obj: Record<string, string> = {};
+    for (const [key, value] of sessionMap.entries()) {
+      obj[key] = value;
+    }
+    // Keep at most 100 entries to avoid unbounded growth
+    const entries = Object.entries(obj);
+    if (entries.length > 100) {
+      entries.slice(0, 100).forEach(([k, v]) => { obj[k] = v; });
+      // Remove excess keys from obj
+      entries.slice(100).forEach(([k]) => { delete obj[k]; });
+    }
+    fs.writeFileSync(sessionMapPath, JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (e) {
+    // Ignore — persistence is best-effort
+  }
+}
+
+// Load persisted session map on module init
+loadSessionMap();
 
 export function getActiveChild(): ChildProcess | null {
   return activeChild;
@@ -86,8 +126,11 @@ export function sendMessage(
   let parsedIndex = 0;
   let inBox = false;
   let inDiff = false;
+
   let diffBuffer = '';
   let isThinkingBox = false;
+  let toolBuffer = '';
+  let toolBufferToolName = '';
 
   try {
     const isWindows = process.platform === 'win32';
@@ -112,6 +155,7 @@ export function sendMessage(
         const match = fullOutput.match(/Session:\s+([a-zA-Z0-9_]+)/);
         if (match) {
           sessionMap.set(data.sessionId, match[1]);
+          saveSessionMap();
         }
       }
 
@@ -193,29 +237,72 @@ export function sendMessage(
           } else if (trimmed.startsWith('┊') || trimmed.match(/^[│┊]\s/)) {
             const toolMatch = trimmed.match(/[│┊]\s*(?:💻|✍️|🔍|📁|🌐|⚡|🔧|📝|🛠️|⚙️|🔒)\s*(?:preparing\s+)?(.+?)…?$/);
             if (toolMatch) {
+              // Start of a new tool activity — flush previous buffer if any
+              if (toolBuffer) {
+                const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
+                mainWindow?.webContents.send('stream-segment', {
+                  type: 'tool_activity',
+                  content: contentText,
+                  toolName: toolBufferToolName || undefined,
+                });
+              }
               let contentText = trimmed.replace(/^[│┊]\s*/, '');
               contentText = contentText.replace(/\s+·\s+\{[\s\S]*$/, '').trim();
-              mainWindow?.webContents.send('stream-segment', {
-                type: 'tool_activity',
-                content: contentText,
-                toolName: toolMatch[1].trim().replace(/…$/, ''),
-              });
+              toolBuffer = trimmed;
+              toolBufferToolName = toolMatch[1].trim().replace(/…$/, '');
             } else if (trimmed.includes('review diff')) {
+              // Flush tool buffer before switching to diff
+              if (toolBuffer) {
+                const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
+                mainWindow?.webContents.send('stream-segment', {
+                  type: 'tool_activity',
+                  content: contentText,
+                  toolName: toolBufferToolName || undefined,
+                });
+                toolBuffer = '';
+                toolBufferToolName = '';
+              }
               inDiff = true;
               diffBuffer = '';
             } else {
-              let contentText = trimmed.replace(/^[│┊]\s*/, '');
-              contentText = contentText.replace(/\s+·\s+\{[\s\S]*$/, '').trim();
+              // Continuation of tool output — add to buffer
+              if (toolBuffer) {
+                toolBuffer += '\n' + trimmed;
+              } else {
+                let contentText = trimmed.replace(/^[│┊]\s*/, '');
+                contentText = contentText.replace(/\s+·\s+\{[\s\S]*$/, '').trim();
+                toolBuffer = trimmed;
+                toolBufferToolName = '';
+              }
+            }
+          } else if (trimmed) {
+            // Non-tool, non-box line — flush tool buffer
+            if (toolBuffer) {
+              const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
               mainWindow?.webContents.send('stream-segment', {
                 type: 'tool_activity',
                 content: contentText,
+                toolName: toolBufferToolName || undefined,
               });
+              toolBuffer = '';
+              toolBufferToolName = '';
             }
-          } else if (trimmed) {
             mainWindow?.webContents.send('stream-segment', {
               type: 'text',
               content: line.replace(/^    /gm, ''),
             });
+          } else {
+            // Empty line — flush tool buffer
+            if (toolBuffer) {
+              const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
+              mainWindow?.webContents.send('stream-segment', {
+                type: 'tool_activity',
+                content: contentText,
+                toolName: toolBufferToolName || undefined,
+              });
+              toolBuffer = '';
+              toolBufferToolName = '';
+            }
           }
 
           unparsed = fullOutput.substring(parsedIndex);
@@ -230,6 +317,15 @@ export function sendMessage(
     activeChild.on('close', (code) => {
       if (inDiff && diffBuffer.trim()) {
         mainWindow?.webContents.send('stream-segment', { type: 'diff', content: diffBuffer.trim() });
+      }
+      // Flush any remaining tool buffer
+      if (toolBuffer) {
+        const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
+        mainWindow?.webContents.send('stream-segment', {
+          type: 'tool_activity',
+          content: contentText,
+          toolName: toolBufferToolName || undefined,
+        });
       }
       mainWindow?.webContents.send('stream-end', { code });
       activeChild = null;

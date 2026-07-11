@@ -42,7 +42,9 @@ export function startClapDetector() {
   }
 
   console.log('[ClapDetector] Starting...');
-  clapDetector = spawn(hermesAgentVenvPython, [clapScriptPath]);
+  const sensitivity = config.echoClapSensitivity ?? 0.5;
+  const args = [clapScriptPath, '--sensitivity', String(sensitivity)];
+  clapDetector = spawn(hermesAgentVenvPython, args);
 
   clapDetector.stdout?.on('data', (data: Buffer) => {
     try {

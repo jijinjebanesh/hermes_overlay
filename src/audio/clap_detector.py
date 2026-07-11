@@ -9,10 +9,8 @@ import time
 import json
 import sys
 
-# Configuration - AUTOMATICALLY CALIBRATED for Jijin's mic
-# Measured max ambient: 0.0008, so threshold set to 3x that = 0.0025
-# This is VERY sensitive - adjust if you get false positives
-INITIAL_TAP_THRESHOLD = 0.015  # Increased to prevent speech false positives
+# Configuration from reference implementation
+INITIAL_TAP_THRESHOLD = 0.015  # Default, overridable via --sensitivity
 FORMAT = pyaudio.paInt16 
 SHORT_NORMALIZE = (1.0/32768.0)
 CHANNELS = 1  # Mono
@@ -29,11 +27,26 @@ MAX_TAP_BLOCKS = 0.10 / INPUT_BLOCK_TIME     # Tap must be < 100ms
 MIN_GAP_MS = 100
 MAX_GAP_MS = 1500  # Increased from 600ms to 1500ms as requested
 
+def parse_sensitivity():
+    """Parse --sensitivity argument from command line.
+    Maps UI slider 0.1-1.0 to threshold: lower = more sensitive.
+    e.g. 0.1 -> 0.01 (very sensitive), 1.0 -> 0.1 (less sensitive)."""
+    args = sys.argv[1:]
+    for i, arg in enumerate(args):
+        if arg == '--sensitivity' and i + 1 < len(args):
+            try:
+                val = float(args[i + 1])
+                val = max(0.05, min(1.0, val))  # clamp
+                return val / 10.0  # 0.1 -> 0.01, 1.0 -> 0.1
+            except ValueError:
+                pass
+    return INITIAL_TAP_THRESHOLD  # default
+
 class ClapDetector:
     def __init__(self):
         self.pa = pyaudio.PyAudio()
         self.stream = self.open_mic_stream()
-        self.tap_threshold = INITIAL_TAP_THRESHOLD
+        self.tap_threshold = parse_sensitivity()  # from --sensitivity CLI arg
         self.noisycount = MAX_TAP_BLOCKS + 1  # Start in "listening" state
         self.quietcount = 0 
         self.errorcount = 0
@@ -240,6 +253,7 @@ class ClapDetector:
             self.pa.terminate()
 
 if __name__ == "__main__":
-    print(json.dumps({"init": "Hermes Clap Detector (clapDetection-based)", "threshold": INITIAL_TAP_THRESHOLD}), flush=True)
+    threshold = parse_sensitivity()
+    print(json.dumps({"init": "Hermes Clap Detector (clapDetection-based)", "threshold": threshold}), flush=True)
     detector = ClapDetector()
     detector.run()

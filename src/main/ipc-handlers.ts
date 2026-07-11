@@ -3,7 +3,7 @@
  * Organized by domain: config, inventory, files, sessions, settings, echo.
  */
 
-import { ipcMain, dialog, desktopCapturer, screen, shell, app, globalShortcut } from 'electron';
+import { ipcMain, dialog, desktopCapturer, screen, shell, app, globalShortcut, clipboard, Notification } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -11,6 +11,20 @@ import { spawn, execSync } from 'child_process';
 import { loadOverlayConfig, saveOverlayConfig, sessionsDir } from './config';
 import { getMainWindow, toggleVisibility, getIsVisible } from './window';
 import { sendMessage, killActiveChild, sendInputToChild } from './hermes-cli';
+import { transcribeViaDaemon, isWhisperDaemonReady } from './whisper-daemon';
+
+// ── Background Task Tracker ──
+interface BackgroundTask {
+  id: string;
+  prompt: string;
+  status: 'running' | 'completed' | 'failed';
+  output: string;
+  startTime: number;
+  endTime?: number;
+  hermesSessionId?: string;
+}
+
+const backgroundTasks = new Map<string, BackgroundTask>();
 
 const scriptsDir = path.join(__dirname, '..', 'scripts');
 const hermesAgentVenvPython = path.join(os.homedir(), 'AppData', 'Local', 'hermes', 'hermes-agent', 'venv', 'Scripts', 'python.exe');
@@ -264,6 +278,57 @@ export function registerIpcHandlers() {
     }
   });
 
+  // ── Context Capture (Screen & App Awareness) ──
+  // Grabs screenshot + clipboard text in one shot — used for auto-context on summon.
+  // Returns { screenshot?: {path, name}, clipboardText?: string }
+  ipcMain.handle('capture-context', async () => {
+    const win = getMainWindow();
+    const wasVisible = Boolean(win && !win.isDestroyed() && win.isVisible());
+
+    const result: { screenshot?: { path: string; name: string }; clipboardText?: string } = {};
+
+    try {
+      // Read clipboard text (instant, no UI disruption)
+      try {
+        const clipText = clipboard.readText();
+        if (clipText && clipText.trim().length > 0) {
+          result.clipboardText = clipText.trim();
+        }
+      } catch (e) {
+        // Clipboard read can fail in rare cases — not fatal
+      }
+
+      // Capture screenshot — hide overlay first if visible to avoid capturing ourselves
+      if (wasVisible && win) {
+        win.hide();
+        await new Promise<void>((resolve) => setTimeout(resolve, 180));
+      }
+
+      try {
+        const sources = await desktopCapturer.getSources({
+          types: ['screen'], thumbnailSize: { width: 1920, height: 1080 },
+        });
+        if (sources.length > 0) {
+          const tmpDir = path.join(os.tmpdir(), 'hermes-screenshots');
+          if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+          const filename = `screenshot_${Date.now()}.png`;
+          const filepath = path.join(tmpDir, filename);
+          fs.writeFileSync(filepath, sources[0].thumbnail.toPNG());
+          result.screenshot = { path: filepath, name: filename };
+        }
+      } catch (e) {
+        console.error('[ContextCapture] Screenshot failed:', e);
+      }
+    } finally {
+      if (wasVisible && win && !win.isDestroyed()) {
+        win.show();
+        win.focus();
+      }
+    }
+
+    return result;
+  });
+
   // ── Files ──
   ipcMain.handle('capture-screenshot', async () => {
     const win = getMainWindow();
@@ -378,11 +443,24 @@ export function registerIpcHandlers() {
   ipcMain.handle('transcribe-audio', async (_event, buffer: Uint8Array) => {
     const tmpPath = path.join(os.tmpdir(), `hermes_echo_${Date.now()}.webm`);
     fs.writeFileSync(tmpPath, Buffer.from(buffer));
+
+    // Try the preloaded Whisper daemon first (instant — no model-load latency)
+    if (isWhisperDaemonReady()) {
+      try {
+        const transcript = await transcribeViaDaemon(tmpPath);
+        try { fs.unlinkSync(tmpPath); } catch (_) {}
+        return transcript;
+      } catch (e) {
+        console.warn('[Transcribe] Daemon failed, falling back to spawn:', e);
+      }
+    }
+
+    // Fallback: spawn one-shot whisper process (1-2s model load penalty)
     return new Promise((resolve) => {
       const proc = spawn(hermesAgentVenvPython, [cliPath, '--transcribe', tmpPath]);
       let out = '';
       proc.stdout?.on('data', (d: Buffer) => out += d);
-      proc.on('close', () => { try { fs.unlinkSync(tmpPath); } catch (e) {} resolve(out.trim()); });
+      proc.on('close', () => { try { fs.unlinkSync(tmpPath); } catch (_) {} resolve(out.trim()); });
       proc.on('error', () => resolve(''));
       setTimeout(() => { proc.kill(); resolve(''); }, 30000);
     });
@@ -406,15 +484,20 @@ export function registerIpcHandlers() {
     });
   });
 
-  ipcMain.handle('echo-send-message', async (_event, { text }) => {
+  ipcMain.handle('echo-send-message', async (event, { text, imagePath }) => {
     return new Promise((resolve) => {
       const config = loadOverlayConfig();
       const args = ['-z', text];
       if (config.activeProvider) args.push('--provider', config.activeProvider);
       if (config.activeModel) args.push('--model', config.activeModel);
+      if (imagePath) args.push('--image', imagePath);
       const proc = spawn('hermes.exe', args);
       let out = '';
-      proc.stdout?.on('data', (d: Buffer) => out += d.toString());
+      proc.stdout?.on('data', (d: Buffer) => {
+        const chunk = d.toString();
+        out += chunk;
+        event.sender.send('echo-stream-chunk', chunk);
+      });
       proc.stderr?.on('data', () => {});
       proc.on('close', () => resolve(out.trim()));
       proc.on('error', () => resolve(''));
@@ -432,5 +515,225 @@ export function registerIpcHandlers() {
     if (!win) return;
     if (!getIsVisible()) toggleVisibility();
     win.webContents.send('enter-echo-mode');
+  });
+
+  // ── Echo settings sync ──
+  // Renderer calls these when echo settings change so the main process
+  // can persist to overlay.json and restart services (clap detector, etc.)
+  ipcMain.on('echo-settings-changed', (_e, settings: Record<string, any>) => {
+    saveOverlayConfig(settings);
+    // Restart clap detector if relevant settings changed
+    if ('echoClapWakeEnabled' in settings || 'echoClapSensitivity' in settings) {
+      const { restartClapDetector } = require('./clap-detector');
+      restartClapDetector();
+    }
+  });
+
+  // ── Clipboard ──
+  ipcMain.handle('read-clipboard', () => {
+    return clipboard.readText();
+  });
+
+  // ── Memory (MEMORY.md / USER.md) ──
+  ipcMain.handle('read-memory', async () => {
+    try {
+      const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+      const hermesMemDir = path.join(localAppData, 'hermes', 'memories');
+      const result: Record<string, string> = {};
+
+      // Read MEMORY.md
+      const memoryPath = path.join(hermesMemDir, 'MEMORY.md');
+      if (fs.existsSync(memoryPath)) {
+        result.memory = fs.readFileSync(memoryPath, 'utf-8');
+      }
+
+      // Read USER.md
+      const userPath = path.join(hermesMemDir, 'USER.md');
+      if (fs.existsSync(userPath)) {
+        result.user = fs.readFileSync(userPath, 'utf-8');
+      }
+
+      return result;
+    } catch (e: any) {
+      console.error('Failed to read memory files:', e);
+      return { error: e.message };
+    }
+  });
+
+  ipcMain.handle('save-memory', async (_event, data: { memory?: string; user?: string }) => {
+    try {
+      const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+      const hermesMemDir = path.join(localAppData, 'hermes', 'memories');
+      if (!fs.existsSync(hermesMemDir)) fs.mkdirSync(hermesMemDir, { recursive: true });
+
+      if (data.memory !== undefined) {
+        fs.writeFileSync(path.join(hermesMemDir, 'MEMORY.md'), data.memory, 'utf-8');
+      }
+      if (data.user !== undefined) {
+        fs.writeFileSync(path.join(hermesMemDir, 'USER.md'), data.user, 'utf-8');
+      }
+      return { success: true };
+    } catch (e: any) {
+      console.error('Failed to save memory files:', e);
+      return { error: e.message };
+    }
+  });
+
+  // ── Session Search ──
+  ipcMain.handle('search-sessions', async (_event, query: string) => {
+    return new Promise((resolve) => {
+      try {
+        const scriptPath = findScript('search_sessions.py');
+        if (!scriptPath) { resolve([]); return; }
+        const child = spawn('python', [scriptPath, query], {
+          shell: true, timeout: 10000, env: { ...process.env },
+        });
+        let stdout = '';
+        child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+        child.stderr?.on('data', () => {});
+        child.on('close', () => {
+          try {
+            const jsonMatch = stdout.match(/\[[\s\S]*\]/);
+            if (jsonMatch) resolve(JSON.parse(jsonMatch[0]));
+            else resolve([]);
+          } catch (e) { resolve([]); }
+        });
+        child.on('error', () => resolve([]));
+      } catch (e) { resolve([]); }
+    });
+  });
+
+  // ── Background Tasks (Fire-and-Forget Agents) ──
+  ipcMain.handle('dispatch-background', async (_event, data: {
+    text: string;
+    sessionId?: string;
+    provider?: string;
+    model?: string;
+  }) => {
+    const taskId = `bg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const config = loadOverlayConfig();
+
+    const args: string[] = [];
+    if (data.sessionId) args.push('--resume', data.sessionId);
+    args.push('chat', '-q', data.text, '--accept-hooks');
+    const provider = data.provider || config.activeProvider;
+    const model = data.model || config.activeModel;
+    if (provider) args.push('--provider', provider);
+    if (model) args.push('--model', model);
+
+    const task: BackgroundTask = {
+      id: taskId,
+      prompt: data.text.substring(0, 100),
+      status: 'running',
+      output: '',
+      startTime: Date.now(),
+    };
+    backgroundTasks.set(taskId, task);
+
+    // Notify renderer that a task started
+    const win = getMainWindow();
+    win?.webContents.send('background-task-update', { ...task });
+
+    try {
+      const isWindows = process.platform === 'win32';
+      const child = spawn(isWindows ? 'hermes.exe' : 'hermes', args, {
+        shell: false,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          FORCE_COLOR: '0',
+          NO_COLOR: '1',
+          TERM: 'dumb',
+        },
+      });
+
+      let output = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString().replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+        output += text;
+
+        // Capture session ID
+        if (!task.hermesSessionId) {
+          const match = output.match(/Session:\s+([a-zA-Z0-9_]+)/);
+          if (match) task.hermesSessionId = match[1];
+        }
+      });
+      child.stderr?.on('data', () => {});
+
+      child.on('close', (code) => {
+        task.status = code === 0 ? 'completed' : 'failed';
+        task.endTime = Date.now();
+        task.output = output.substring(0, 50000); // Cap output
+
+        // Send Windows native notification
+        try {
+          if (Notification.isSupported()) {
+            const notif = new Notification({
+              title: 'Hermes Background Task',
+              body: task.status === 'completed'
+                ? `Task complete: "${task.prompt}..."`
+                : `Task failed: "${task.prompt}..."`,
+              silent: false,
+            });
+            notif.on('click', () => {
+              // Show the overlay when notification is clicked
+              const w = getMainWindow();
+              if (w && !getIsVisible()) {
+                toggleVisibility();
+              }
+              w?.webContents.send('background-task-clicked', taskId);
+            });
+            notif.show();
+          }
+        } catch (e) {
+          console.error('[BackgroundTask] Notification failed:', e);
+        }
+
+        // Notify renderer
+        const w = getMainWindow();
+        w?.webContents.send('background-task-update', { ...task });
+      });
+
+      child.on('error', (err) => {
+        task.status = 'failed';
+        task.endTime = Date.now();
+        task.output = `Error: ${err.message}`;
+        backgroundTasks.set(taskId, { ...task });
+        const w = getMainWindow();
+        w?.webContents.send('background-task-update', { ...task });
+      });
+    } catch (err: any) {
+      task.status = 'failed';
+      task.output = `Error: ${err.message}`;
+      backgroundTasks.set(taskId, { ...task });
+      const w = getMainWindow();
+      w?.webContents.send('background-task-update', { ...task });
+    }
+
+    return taskId;
+  });
+
+  ipcMain.handle('list-background-tasks', async () => {
+    return Array.from(backgroundTasks.values()).sort((a, b) => b.startTime - a.startTime);
+  });
+
+  ipcMain.handle('get-background-task', async (_event, taskId: string) => {
+    return backgroundTasks.get(taskId) || null;
+  });
+
+  ipcMain.handle('clear-background-task', async (_event, taskId: string) => {
+    backgroundTasks.delete(taskId);
+    return true;
+  });
+
+  // ── Quick Actions (Floating Toolbar) ──
+  const { processQuickAction, hideQuickActions } = require('./quick-actions');
+
+  ipcMain.handle('quick-action-execute', async (_event, data: { action: string; text: string }) => {
+    return processQuickAction(data.action, data.text);
+  });
+
+  ipcMain.on('quick-action-close', () => {
+    hideQuickActions();
   });
 }

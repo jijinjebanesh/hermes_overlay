@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Command, Monitor, Zap, Layout, Mic, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { X, Command, Monitor, Zap, Layout, Mic, Brain } from 'lucide-react';
 import { useOverlayStore } from '../store/overlayStore';
 import { GeneralSettings } from './settings/GeneralSettings';
 import { HotkeySettings } from './settings/HotkeySettings';
 import { AISettings } from './settings/AISettings';
 import { WindowSettings } from './settings/WindowSettings';
 import { EchoSettings } from './settings/EchoSettings';
+import { MemorySettings } from './settings/MemorySettings';
 
 const SETTINGS_TABS = [
   { id: 'general', label: 'General', description: 'Appearance and startup', icon: Monitor },
   { id: 'hotkey', label: 'Hotkey', description: 'Global activation', icon: Command },
   { id: 'ai', label: 'AI Engine', description: 'Provider, model, tools', icon: Zap },
+  { id: 'memory', label: 'Memory', description: 'Persistent memory & profile', icon: Brain },
   { id: 'window', label: 'Window', description: 'Overlay behavior', icon: Layout },
   { id: 'echo', label: 'Echo Mode', description: 'Voice interaction', icon: Mic },
 ] as const;
@@ -36,7 +38,7 @@ export const SettingsModal: React.FC = () => {
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="settings-modal sidebar-collapsed"
+            className="settings-modal"
             onClick={(e) => e.stopPropagation()}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -46,7 +48,7 @@ export const SettingsModal: React.FC = () => {
             <div className="settings-sidebar">
               <div className="settings-sidebar-header">
                 <span>Hermes</span>
-                <strong>Settings</strong>
+                <span className="settings-sidebar-sub">Preferences</span>
               </div>
 
               {SETTINGS_TABS.map((tab) => {
@@ -56,9 +58,9 @@ export const SettingsModal: React.FC = () => {
                     key={tab.id}
                     className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
                     onClick={() => setActiveTab(tab.id)}
-                    title={`${tab.label} — ${tab.description}`}
                   >
-                    <span className="settings-tab-icon"><Icon size={15} /></span>
+                    <span className="settings-tab-icon"><Icon size={15} strokeWidth={1.5} /></span>
+                    <span className="settings-tab-label">{tab.label}</span>
                   </button>
                 );
               })}
@@ -78,6 +80,7 @@ export const SettingsModal: React.FC = () => {
                 {activeTab === 'general' && <GeneralSettings />}
                 {activeTab === 'hotkey' && <HotkeySettings />}
                 {activeTab === 'ai' && <AISettings />}
+                {activeTab === 'memory' && <MemorySettings />}
                 {activeTab === 'window' && <WindowSettings />}
                 {activeTab === 'echo' && <EchoSettings />}
               </div>

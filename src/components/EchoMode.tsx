@@ -10,11 +10,20 @@ interface EchoModeProps {
   onExit: (sessionTranscript?: EchoSessionTurn[]) => void;
 }
 
+/**
+ * Apple-style live transcript display mode:
+ * - "Apple Intelligence" style: agent words reveal in sync with TTS audio,
+ *   using onTtsChunkStart to snap highlighting to the chunk being spoken.
+ * - Bubble sits BELOW the orb, above controls — not floating way up top.
+ * - Smooth vertical auto-scroll when text overflows — no horizontal jank.
+ * - Listening: user transcript with dimmed interim text, single-line.
+ * - Thinking/Processing: finalized transcript with soft animation.
+ * - Responsive: max-height adapts to window/compact mode, font scales naturally.
+ */
 export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
   const [state, setState] = useState<EchoState>('initializing');
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
-  const [finalTranscript, setFinalTranscript] = useState('');
   const [agentText, setAgentText] = useState('');
   const [amplitude, setAmplitude] = useState(0);
   const [isCompactMode, setIsCompactMode] = useState(false);
@@ -25,9 +34,15 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
   const [volume, setVolume] = useState(80);
   const [latencyWarning, setLatencyWarning] = useState<string | null>(null);
   const [osMicMuted, setOsMicMuted] = useState(false);
-  const [revealedWords, setRevealedWords] = useState(0);
   const [showTextInput, setShowTextInput] = useState(false);
   const [textInputValue, setTextInputValue] = useState('');
+
+  // Word reveal synced to TTS chunks — onTtsChunkStart snaps these forward
+  const [revealedWords, setRevealedWords] = useState(0);
+  const wordRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentTextRef = useRef(agentText);
+  // When a TTS chunk starts, we fast-forward revealedWords to the end of that chunk
+  const ttsChunkEndWordIdxRef = useRef(0);
 
   const engineRef = useRef<EchoEngine | null>(null);
   const prevStateRef = useRef<EchoState>('initializing');
@@ -35,12 +50,12 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
   const volumePopoverRef = useRef<HTMLDivElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
   const wasMutedBeforeTextRef = useRef(false);
-  const wordRevealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const agentTextRef = useRef(agentText);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const latencyTimerRef = useRef<{ t5: ReturnType<typeof setTimeout> | null; t15: ReturnType<typeof setTimeout> | null }>({ t5: null, t15: null });
 
   const { sessionDuration, getTranscript, addManualUserTurn } = useEchoSession(state, transcript, agentText);
 
+  // ── Compact mode detection ──
   useEffect(() => {
     const checkCompactMode = () => {
       const shell = document.querySelector('.overlay-shell');
@@ -57,11 +72,13 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     };
   }, []);
 
+  // ── Orb entrance animation ──
   useEffect(() => {
     const t = setTimeout(() => setOrbVisible(true), 100);
     return () => clearTimeout(t);
   }, []);
 
+  // ── Auto-focus mute button after init ──
   useEffect(() => {
     if (state !== 'initializing' && muteBtnRef.current) {
       const t = setTimeout(() => muteBtnRef.current?.focus(), 600);
@@ -69,6 +86,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     }
   }, [state === 'initializing']);
 
+  // ── ARIA announcements on state change ──
   useEffect(() => {
     if (state === prevStateRef.current) return;
     prevStateRef.current = state;
@@ -84,6 +102,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     setAriaAnnouncement(announcements[state] || '');
   }, [state, isMuted, agentText]);
 
+  // ── Latency warning timers ──
   useEffect(() => {
     if (latencyTimerRef.current.t5) clearTimeout(latencyTimerRef.current.t5);
     if (latencyTimerRef.current.t15) clearTimeout(latencyTimerRef.current.t15);
@@ -104,6 +123,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     };
   }, [state]);
 
+  // ── OS-level mic mute detection ──
   useEffect(() => {
     if (!engineRef.current?.micStream) return;
     const tracks = engineRef.current.micStream.getAudioTracks();
@@ -123,36 +143,74 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     };
   }, [state]);
 
+  // ── Keep agentTextRef in sync ──
   useEffect(() => {
     agentTextRef.current = agentText;
   }, [agentText]);
 
+  // ── Word reveal synced with TTS chunks ──
+  // When a TTS chunk starts playing, jump revealedWords to include that entire chunk.
+  // Then continue revealing remaining words at ~130ms/word for smooth trailing effect.
   useEffect(() => {
-    if (wordRevealTimerRef.current) {
-      clearInterval(wordRevealTimerRef.current);
-      wordRevealTimerRef.current = null;
+    if (state !== 'speaking') {
+      if (wordRevealTimerRef.current) {
+        clearTimeout(wordRevealTimerRef.current);
+        wordRevealTimerRef.current = null;
+      }
+      setRevealedWords(0);
+      ttsChunkEndWordIdxRef.current = 0;
+      return;
     }
 
-    if (state === 'speaking') {
-      setRevealedWords(0);
-      wordRevealTimerRef.current = setInterval(() => {
-        setRevealedWords(prev => {
-          const words = agentTextRef.current.split(/\s+/).filter(Boolean);
-          if (prev >= words.length) {
-            return prev;
-          }
-          return prev + 1;
-        });
-      }, 140);
-    } else {
-      setRevealedWords(0);
+    const words = agentText.split(/\s+/).filter(w => w.length > 0);
+    
+    const advanceReveal = () => {
+      setRevealedWords(prev => {
+        // Don't exceed what's been revealed by TTS chunks plus trailing allowance
+        const target = Math.min(
+          words.length,
+          ttsChunkEndWordIdxRef.current + 5  // allow 5-word trailing fade behind current audio
+        );
+        const next = prev + 1;
+        if (next < target) {
+          wordRevealTimerRef.current = setTimeout(advanceReveal, 130);
+        } else {
+          wordRevealTimerRef.current = null;
+        }
+        return next;
+      });
+    };
+
+    // If a TTS chunk jumped ahead of us, fast-forward immediately then continue
+    if (revealedWords < ttsChunkEndWordIdxRef.current && !wordRevealTimerRef.current) {
+      // Jump to the chunk boundary minus 2 words (for smooth entry)
+      const jumpTo = Math.max(revealedWords, ttsChunkEndWordIdxRef.current - 2);
+      if (jumpTo > revealedWords) {
+        setRevealedWords(jumpTo);
+      }
+      if (jumpTo < words.length) {
+        wordRevealTimerRef.current = setTimeout(advanceReveal, 130);
+      }
+    } else if (revealedWords === 0 && words.length > 0 && !wordRevealTimerRef.current) {
+      wordRevealTimerRef.current = setTimeout(advanceReveal, 130);
     }
 
     return () => {
-      if (wordRevealTimerRef.current) clearInterval(wordRevealTimerRef.current);
+      if (wordRevealTimerRef.current) {
+        clearTimeout(wordRevealTimerRef.current);
+        wordRevealTimerRef.current = null;
+      }
     };
-  }, [state]);
+  }, [state, agentText]);
 
+  // ── Auto-scroll transcript container when new text arrives ──
+  useEffect(() => {
+    if (transcriptScrollRef.current) {
+      transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+    }
+  }, [transcript, interimTranscript, agentText, revealedWords]);
+
+  // ── Click-outside for volume popover ──
   useEffect(() => {
     if (!showVolumePopover) return;
     const handler = (e: MouseEvent) => {
@@ -164,6 +222,8 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     return () => document.removeEventListener('mousedown', handler);
   }, [showVolumePopover]);
 
+  // ── Helpers ──
+
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -171,9 +231,13 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
   };
 
   const handleExit = useCallback(() => {
+    if (wordRevealTimerRef.current) {
+      clearTimeout(wordRevealTimerRef.current);
+      wordRevealTimerRef.current = null;
+    }
     engineRef.current?.destroy();
-    const transcript = getTranscript();
-    onExit(transcript.length > 0 ? transcript : undefined);
+    const transcriptTurns = getTranscript();
+    onExit(transcriptTurns.length > 0 ? transcriptTurns : undefined);
   }, [onExit, getTranscript]);
 
   const toggleMute = useCallback(() => {
@@ -205,7 +269,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     setShowTextInput(false);
     setTextInputValue('');
     if (!wasMutedBeforeTextRef.current && engineRef.current?.micStream) {
-      engineRef.current.micStream.getAudioTracks().forEach(t => { t.enabled = true; });
+      engineRef.current?.micStream.getAudioTracks().forEach(t => { t.enabled = true; });
       setIsMuted(false);
     }
   }, []);
@@ -219,20 +283,53 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     setShowTextInput(false);
     setTextInputValue('');
 
-    if (!wasMutedBeforeTextRef.current && engineRef.current.micStream) {
-      engineRef.current.micStream.getAudioTracks().forEach(t => { t.enabled = true; });
+    if (!wasMutedBeforeTextRef.current && engineRef.current?.micStream) {
+      engineRef.current?.micStream.getAudioTracks().forEach(t => { t.enabled = true; });
       setIsMuted(false);
     }
 
     engineRef.current.sendTextMessage(text);
   }, [textInputValue, addManualUserTurn]);
 
+  // ── onTtsChunkStart: TTS just started speaking this text — sync word reveal ──
+  const handleTtsChunkStart = useCallback((chunkText: string) => {
+    // Count how many words in agentText precede this chunk
+    const words = agentTextRef.current.split(/\s+/).filter(w => w.length > 0);
+    // Find where in the full agent text this chunk appears
+    const cleanChunk = chunkText.trim();
+    const chunkWords = cleanChunk.split(/\s+/).filter(w => w.length > 0);
+    if (chunkWords.length === 0) return;
+
+    // Accumulate all words up to and including this chunk
+    let cumulativeWords = 0;
+    let searchText = '';
+    for (const word of words) {
+      searchText += (searchText ? ' ' : '') + word;
+      cumulativeWords++;
+      if (searchText.includes(cleanChunk) && cleanChunk.includes(word)) {
+        // We've found the approximate end of this chunk
+        break;
+      }
+    }
+    ttsChunkEndWordIdxRef.current = cumulativeWords;
+
+    // Fast-forward revealedWords to match
+    const jumpTo = Math.max(0, cumulativeWords - 2);
+    setRevealedWords(prev => Math.max(prev, jumpTo));
+  }, []);
+
+  // ── Initialize engine ──
   useEffect(() => {
     const engine = new EchoEngine({
       onStateChange: setState,
-      onTranscriptUpdate: setTranscript,
+      onTranscriptUpdate: (text) => {
+        setTranscript(text);
+        setInterimTranscript('');
+      },
+      onInterimTranscriptUpdate: setInterimTranscript,
       onAgentTextUpdate: setAgentText,
       onAmplitudeUpdate: setAmplitude,
+      onTtsChunkStart: handleTtsChunkStart,
       onExit: handleExit,
     });
 
@@ -243,8 +340,9 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
       engineRef.current?.destroy();
       engineRef.current = null;
     };
-  }, [handleExit]);
+  }, [handleExit, handleTtsChunkStart]);
 
+  // ── Keyboard bindings ──
   useEchoKeyboard({
     onEscape: () => showTextInput ? closeTextInput() : handleExit(),
     onToggleMute: toggleMute,
@@ -252,10 +350,32 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
     showTextInput,
   });
 
+  // ── Push-to-Talk (Ctrl+Space walkie-talkie) ──
+  const pushToTalkActiveRef = useRef(false);
+
+  useEffect(() => {
+    const handler = () => {
+      if (!engineRef.current) return;
+      if (pushToTalkActiveRef.current) {
+        // Second press = release → stop recording and send
+        pushToTalkActiveRef.current = false;
+        engineRef.current.stopPushToTalkAndSend();
+      } else {
+        // First press = start recording
+        pushToTalkActiveRef.current = true;
+        engineRef.current.startPushToTalk();
+      }
+    };
+    window.addEventListener('push-to-talk-toggle', handler);
+    return () => window.removeEventListener('push-to-talk-toggle', handler);
+  }, []);
+
+  // ── Display logic ──
+
   const showAgentCaption = state === 'speaking' && agentText;
   const showUserTranscript = !showAgentCaption && (
     state === 'listening' || state === 'processing' || state === 'thinking'
-  ) && transcript;
+  ) && (transcript || interimTranscript);
 
   const stateLabel: Record<EchoState, string> = {
     initializing: 'Starting up',
@@ -272,8 +392,11 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
   const hasTranscriptContent = !!(showUserTranscript || showAgentCaption);
   const agentWords = agentText ? agentText.split(/\s+/) : [];
 
+  // ── Render ──
+
   return (
     <div className="echo-mode-container" data-state={state} data-compact={isCompactMode}>
+      {/* Screen-reader announcements */}
       <div
         role="status"
         aria-live="polite"
@@ -282,6 +405,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
         {ariaAnnouncement}
       </div>
 
+      {/* Exit button */}
       <button
         className="echo-exit-btn"
         style={{ opacity: isInitializing ? 0 : 1, transition: 'opacity 0.4s ease' }}
@@ -292,56 +416,15 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
         {!isCompactMode && <span className="echo-exit-text">End</span>}
       </button>
 
+      {/* Session timer */}
       {!isInitializing && (
         <div className="echo-timer" style={{ opacity: isInitializing ? 0 : 1 }}>
           {formatDuration(sessionDuration)}
         </div>
       )}
 
-      <div className="echo-transcript-wrapper" data-visible={hasTranscriptContent && !isInitializing}>
-        {showUserTranscript && (
-          <div className={`echo-transcript${isCompactMode ? ' compact' : ''}`} role="log" aria-live="polite">
-            <div 
-              className="echo-transcript-inner" 
-              style={{ transform: `translateX(calc(-1 * max(0, ${transcript.split(/\s+/).length} - 6) * 8ch))` }}
-            >
-              {state === 'listening' && !isMuted && (
-                <span className="echo-transcript-listening-dot" style={{ flexShrink: 0 }} />
-              )}
-              {state === 'listening' ? (
-                <span className="interim">{transcript}</span>
-              ) : (
-                <span>{transcript}</span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {showAgentCaption && (
-          <div className={`echo-transcript${isCompactMode ? ' compact' : ''}`} style={{ fontSize: '17px', fontWeight: 500, letterSpacing: '-0.01em' }}>
-            <div 
-              className="echo-transcript-inner" 
-              style={{ transform: `translateX(calc(-1 * max(0, ${revealedWords} - 6) * 8ch))` }}
-            >
-              {agentWords.map((word, i) => {
-                const isRevealed = i < revealedWords;
-                const opacity = i < revealedWords - 8 ? 0 : i < revealedWords - 5 ? 0.4 : 1;
-                return (
-                  <span 
-                    key={i} 
-                    className={`agent-word${isRevealed ? ' revealed' : ''}`}
-                    style={{ opacity: isRevealed ? opacity : 0 }}
-                  >
-                    {word}{i < agentWords.length - 1 ? ' ' : ''}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="echo-center" data-compact={isCompactMode}>
+      {/* ── Orb stage — always dead center ── */}
+      <div className="echo-orb-stage" data-compact={isCompactMode}>
         <div
           className="echo-orb-wrapper"
           style={{
@@ -353,7 +436,14 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
           <EchoOrb state={state} amplitude={amplitude} compact={isCompactMode} muted={isMuted} />
         </div>
 
-        <div className="echo-state-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div className="echo-state-wrapper" style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center',
+          opacity: hasTranscriptContent ? 0 : 1,
+          transition: 'opacity 0.4s ease',
+          pointerEvents: hasTranscriptContent ? 'none' : 'auto'
+        }}>
           <div
             className="echo-state-label"
             data-compact={isCompactMode}
@@ -370,8 +460,65 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
         </div>
       </div>
 
+      {/* ── TTS Flow — materializing words below the orb ── */}
+      {showAgentCaption && (
+        <div className="echo-tts-flow">
+          <div className="echo-tts-scroll" ref={transcriptScrollRef}>
+            <div className="echo-tts-flow-inner">
+              {agentWords.map((word, i) => {
+                const isRevealed = i < revealedWords;
+                const distanceFromFront = revealedWords - i;
+                const isActive = isRevealed && distanceFromFront <= 2;
+                const opacity = !isRevealed ? 0
+                  : distanceFromFront <= 2 ? 0.95
+                  : distanceFromFront <= 6 ? 0.55
+                  : 0.2;
+                return (
+                  <span
+                    key={i}
+                    className={`echo-tts-word${isRevealed ? ' revealed' : ''}${isActive ? ' active' : ''}`}
+                    style={{ opacity }}
+                  >
+                    {word}{i < agentWords.length - 1 ? ' ' : ''}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── STT Subtitle — cinematic floating text above controls ── */}
+      {showUserTranscript && (
+        <div
+          className="echo-stt-subtitle"
+          data-input-open={showTextInput}
+          role="log"
+          aria-live="polite"
+        >
+          <div className="echo-stt-subtitle-inner">
+            {state === 'listening' && !isMuted && (
+              <span className="stt-listening-dot" />
+            )}
+            {state === 'listening' ? (
+              <>
+                {transcript && <span>{transcript} </span>}
+                {interimTranscript && <span className="stt-interim">{interimTranscript}</span>}
+                {!transcript && !interimTranscript && (
+                  <span className="stt-interim" style={{ opacity: 0.35 }}>Listening…</span>
+                )}
+              </>
+            ) : (
+              <span>{transcript}</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Controls ── */}
       {!isInitializing && (
         <div className="echo-controls">
+          {/* Mute */}
           <button
             ref={muteBtnRef}
             className={`echo-ctrl-btn${isMuted ? ' muted' : ''}`}
@@ -387,6 +534,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
 
           <div className="echo-ctrl-divider" />
 
+          {/* Type to Echo */}
           <button
             className={`echo-ctrl-btn${showTextInput ? ' active' : ''}`}
             onClick={() => showTextInput ? closeTextInput() : openTextInput()}
@@ -399,6 +547,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
 
           <div className="echo-ctrl-divider" />
 
+          {/* Volume / Voice */}
           <div style={{ position: 'relative' }} ref={volumePopoverRef}>
             <button
               className="echo-ctrl-btn"
@@ -441,6 +590,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
 
           <div className="echo-ctrl-divider" />
 
+          {/* End */}
           <button
             className="echo-ctrl-btn end-btn"
             onClick={handleExit}
@@ -453,6 +603,7 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
         </div>
       )}
 
+      {/* ── Type-to-Echo text input ── */}
       {showTextInput && (
         <div className="echo-text-input-bar">
           <input
@@ -492,12 +643,14 @@ export const EchoMode: React.FC<EchoModeProps> = ({ onExit }) => {
         </div>
       )}
 
+      {/* ── OS mic mute warning ── */}
       {osMicMuted && !isMuted && (
         <div className="echo-latency-warning">
           Microphone is muted at system level. Unmute in menu bar or System Preferences.
         </div>
       )}
 
+      {/* ── Error state ── */}
       {state === 'error' && (
         <div className="echo-error-banner" data-compact={isCompactMode}>
           <div style={{ fontWeight: 600, marginBottom: isCompactMode ? 0 : 4 }}>

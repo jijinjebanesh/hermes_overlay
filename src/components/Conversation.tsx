@@ -1,19 +1,19 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Sparkles, ArrowDown } from 'lucide-react';
-import { useOverlayStore } from '../store/overlayStore';
+import { useOverlayStore, generateId } from '../store/overlayStore';
 import { MessageBubble } from './MessageBubble';
 import { EmptyState } from './ui/EmptyState';
 import { IconButton } from './ui/IconButton';
 
 export const Conversation: React.FC = () => {
-  const { messages, streamState } = useOverlayStore();
+  const { messages, streamState, editFromMessage, retryFromMessage } = useOverlayStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [showNewMsg, setShowNewMsg] = useState(false);
   const prevMsgCount = useRef(messages.length);
 
-  // Scroll detection
+  // Scroll detection — passive listener (lightweight, no blocking)
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -25,7 +25,7 @@ export const Conversation: React.FC = () => {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.addEventListener('scroll', handleScroll);
+    el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
@@ -82,24 +82,60 @@ export const Conversation: React.FC = () => {
             transition={{ duration: 0.3, type: 'spring', bounce: 0 }}
             className="message-row"
           >
-            <MessageBubble message={msg} />
+            <MessageBubble 
+              message={msg} 
+              onEdit={() => {
+                const content = editFromMessage(msg.id);
+                if (content) {
+                  window.dispatchEvent(new CustomEvent('hermes-edit-message', { detail: content }));
+                }
+              }}
+              onRetry={() => {
+                const content = retryFromMessage(msg.id);
+                if (content) {
+                  const api = (window as any).electronAPI;
+                  const state = useOverlayStore.getState();
+                  if (api?.sendMessage) {
+                    useOverlayStore.getState().addMessage({
+                      id: generateId(),
+                      role: 'user',
+                      content,
+                      timestamp: Date.now(),
+                    });
+                    useOverlayStore.getState().setStreamState({
+                      isStreaming: true,
+                      tokens: 0,
+                      duration: 0,
+                      mode: state.toolMode,
+                    });
+                    api.sendMessage({
+                      text: content,
+                      sessionId: state.sessionId,
+                      toolMode: state.toolMode,
+                      provider: state.activeProvider,
+                      model: state.activeModel,
+                    });
+                  }
+                }
+              }}
+            />
 
             {/* Streaming cursor and typing indicator */}
             {isStreaming && (
-              <div style={{
-                marginLeft: 12,
-                marginTop: 8,
-                marginBottom: 16,
-                display: 'flex',
-                flexDirection: 'column',
-              }}>
+              <div className="stream-indicator">
                 <div className="typing-indicator">
                   <span className="typing-dot"></span>
                   <span className="typing-dot"></span>
                   <span className="typing-dot"></span>
                 </div>
                 <span className="stream-status">
-                  {streamState.tokens} tokens · {streamState.mode || 'thinking'} · {streamState.duration}s
+                  {streamState.mode === 'thinking' ? 'Thinking' :
+                   streamState.mode === 'tool' ? 'Working' :
+                   streamState.mode === 'terminal' ? 'Running' :
+                   streamState.mode === 'searching' ? 'Searching' :
+                   'Thinking'}
+                  {' · '}
+                  {streamState.duration}s
                 </span>
               </div>
             )}
@@ -114,7 +150,7 @@ export const Conversation: React.FC = () => {
     return (
       <div className="conversation conversation--empty">
         <EmptyState
-          icon={<Sparkles size={32} style={{ color: 'var(--color-accent)' }} />}
+          icon={<Sparkles size={32} style={{ color: 'var(--accent-primary)' }} />}
           title="How can I help you today?"
           description="Ask me anything, or try using voice mode for a hands-free experience."
           className="welcome-empty-state"

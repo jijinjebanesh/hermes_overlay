@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 interface SliderProps {
   value: number;
@@ -7,6 +7,7 @@ interface SliderProps {
   max?: number;
   step?: number;
   label?: string;
+  labelId?: string;
   showValue?: boolean;
   valueFormatter?: (v: number) => string;
   className?: string;
@@ -23,15 +24,18 @@ export const Slider: React.FC<SliderProps> = ({
   max = 100,
   step = 1,
   label,
+  labelId,
   showValue = false,
   valueFormatter = (v) => `${v}`,
   className = '',
 }) => {
+  const generatedId = useId();
+  const sliderId = labelId || `slider-${generatedId}`;
   const percent = ((value - min) / (max - min)) * 100;
 
   return (
     <div className={`slider-container ${className}`}>
-      {label && <span className="slider__label">{label}</span>}
+      {label && <span id={labelId || `${sliderId}-label`} className="slider__label">{label}</span>}
       <input
         type="range"
         className="slider"
@@ -40,7 +44,7 @@ export const Slider: React.FC<SliderProps> = ({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        aria-label={label}
+        aria-labelledby={labelId || `${sliderId}-label`}
         style={{ '--slider-fill': `${percent}%` } as React.CSSProperties}
       />
       {showValue && (

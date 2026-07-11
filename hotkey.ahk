@@ -25,6 +25,16 @@ if (hwnd) {
     windowVisible := (style & WS_VISIBLE) != 0
 }
 
+getToken() {
+    tokenPath1 := A_AppData "\hermes-overlay\.hotkey-token"
+    tokenPath2 := A_AppData "\Electron\.hotkey-token"
+    if FileExist(tokenPath1)
+        return FileRead(tokenPath1)
+    if FileExist(tokenPath2)
+        return FileRead(tokenPath2)
+    return ""
+}
+
 f4:: {
     global windowVisible
     
@@ -33,7 +43,8 @@ f4:: {
     if (hwnd) {
         try {
             req := ComObject("WinHttp.WinHttpRequest.5.1")
-            req.Open("POST", "http://localhost:34567/toggle", false)
+            token := getToken()
+            req.Open("POST", "http://localhost:34567/toggle?token=" . token, false)
             req.Send()
             windowVisible := !windowVisible
             
@@ -62,7 +73,8 @@ f4:: {
                     Sleep(300)
                     try {
                         req := ComObject("WinHttp.WinHttpRequest.5.1")
-                        req.Open("POST", "http://localhost:34567/show", false)
+                        token := getToken()
+                        req.Open("POST", "http://localhost:34567/show?token=" . token, false)
                         req.Send()
                         windowVisible := true
                     } catch {

@@ -6,6 +6,7 @@ interface ToggleProps {
   disabled?: boolean;
   size?: 'sm' | 'md';
   label?: string;
+  id?: string;
 }
 
 /**
@@ -18,8 +19,10 @@ export const Toggle: React.FC<ToggleProps> = ({
   disabled = false,
   size = 'md',
   label,
+  id: providedId,
 }) => {
-  const id = useId();
+  const generatedId = useId();
+  const id = providedId || generatedId;
   const classes = [
     'toggle',
     `toggle--${size}`,
@@ -41,6 +44,7 @@ export const Toggle: React.FC<ToggleProps> = ({
       <span className="toggle__track">
         <span className="toggle__knob" />
       </span>
+      {label && <span className="toggle__label">{label}</span>}
     </label>
   );
 };

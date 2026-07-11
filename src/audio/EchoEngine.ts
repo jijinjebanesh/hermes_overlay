@@ -13,8 +13,12 @@ export type EchoState =
 export interface EchoEngineCallbacks {
   onStateChange: (state: EchoState) => void;
   onTranscriptUpdate: (text: string) => void;
+  onInterimTranscriptUpdate: (text: string) => void;
   onAgentTextUpdate: (text: string) => void;
   onAmplitudeUpdate: (amplitude: number) => void;
+  /** Fired when a chunk of text starts being spoken by TTS.
+   *  The renderer uses this to sync word highlighting with audio. */
+  onTtsChunkStart: (chunkText: string) => void;
   onExit: () => void;
 }
 
@@ -49,6 +53,7 @@ export class EchoEngine {
   private liveRecognition: any = null;
   private currentState: EchoState = 'initializing';
   private isDestroyed: boolean = false;
+  private liveFinalTranscript: string = '';
 
   // TTS chunk queue for gapless playback
   private ttsQueue: { blob: Blob; text: string }[] = [];
@@ -115,6 +120,98 @@ export class EchoEngine {
    * Bypasses STT — goes directly to the LLM agent, then TTS response.
    * Called from "Type to Echo" input in EchoMode.
    */
+  /**
+   * Public API: Start recording immediately (Push-to-Talk).
+   * Bypasses silence detection — user holds hotkey, mic streams,
+   * release triggers send. Called from EchoMode renderer.
+   */
+  async startPushToTalk() {
+    if (this.isDestroyed) return;
+    // If already listening, restart fresh
+    cancelAnimationFrame(this.amplitudeFrame);
+    this.stopLiveRecognition();
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
+
+    this.liveFinalTranscript = '';
+    this.callbacks.onStateChange('listening');
+    this.callbacks.onTranscriptUpdate('🎙 Hold to speak...');
+    this.callbacks.onInterimTranscriptUpdate('');
+    this.startAmplitudeLoop('mic');
+
+    this.chunks = [];
+    this.mediaRecorder = new MediaRecorder(this.micStream!, {
+      mimeType: 'audio/webm;codecs=opus'
+    });
+    this.mediaRecorder.ondataavailable = (e) => this.chunks.push(e.data);
+    this.mediaRecorder.start(100);
+
+    this.startLiveRecognition();
+  }
+
+  /**
+   * Public API: Stop recording and immediately send (Push-to-Talk release).
+   * Bypasses silence detection — user released hotkey, process and send now.
+   */
+  async stopPushToTalkAndSend() {
+    if (this.isDestroyed) return;
+    cancelAnimationFrame(this.amplitudeFrame);
+    this.stopLiveRecognition();
+
+    if (this.mediaRecorder?.state !== 'inactive') {
+      this.mediaRecorder?.stop();
+    }
+
+    this.callbacks.onStateChange('processing');
+
+    // Use live transcript if available, otherwise wait for Whisper
+    if (!this.liveFinalTranscript.trim() || this.liveFinalTranscript.trim().length < 2) {
+      await this.delay(50);
+      const blob = new Blob(this.chunks, { type: 'audio/webm;codecs=opus' });
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      try {
+        const whisperResult = await window.electronAPI.transcribeAudio(uint8Array);
+        this.liveFinalTranscript = whisperResult;
+      } catch (e) {
+        console.error('[EchoEngine] Push-to-talk transcription error:', e);
+      }
+    }
+
+    const transcript = this.liveFinalTranscript.trim();
+    if (!transcript || transcript.length < 2) {
+      this.callbacks.onTranscriptUpdate('');
+      this.callbacks.onStateChange('listening');
+      this.startListening();
+      return;
+    }
+
+    const lower = transcript.toLowerCase();
+    if (this.isExitPhrase(lower)) {
+      this.callbacks.onExit();
+      return;
+    }
+
+    // Screen context check
+    let agentText = transcript;
+    if (this.isScreenContextPhrase(lower)) {
+      try {
+        const screenshot = await window.electronAPI.captureScreenshot();
+        if (screenshot?.path) {
+          agentText = `<file name="${screenshot.name}" path="${screenshot.path}" type="image">[Screenshot captured]</file>\n\n${transcript}`;
+          this.callbacks.onTranscriptUpdate('📸 Capturing screen...');
+        }
+      } catch (e) {
+        console.warn('[EchoEngine] Screenshot capture failed:', e);
+      }
+    }
+
+    this.callbacks.onTranscriptUpdate(agentText);
+    this.callbacks.onStateChange('thinking');
+    await this.sendToAgent(agentText);
+  }
+
   async sendTextMessage(text: string) {
     if (this.isDestroyed || !text.trim()) return;
 
@@ -131,10 +228,24 @@ export class EchoEngine {
       return;
     }
 
+    // Screen context: capture screenshot and prepend to agent prompt
+    let agentText = text;
+    if (this.isScreenContextPhrase(text.toLowerCase())) {
+      try {
+        const screenshot = await window.electronAPI.captureScreenshot();
+        if (screenshot?.path) {
+          agentText = `<file name="${screenshot.name}" path="${screenshot.path}" type="image">[Screenshot captured]</file>\n\n${text}`;
+          this.callbacks.onTranscriptUpdate('📸 Capturing screen...');
+        }
+      } catch (e) {
+        console.warn('[EchoEngine] Screenshot capture failed:', e);
+      }
+    }
+
     // Set transcript and transition to thinking
-    this.callbacks.onTranscriptUpdate(text);
+    this.callbacks.onTranscriptUpdate(agentText);
     this.callbacks.onStateChange('thinking');
-    await this.sendToAgent(text);
+    await this.sendToAgent(agentText);
   }
 
   private async initMic() {
@@ -155,6 +266,7 @@ export class EchoEngine {
 
   private startListening() {
     if (this.isDestroyed) return;
+    this.liveFinalTranscript = '';
     this.callbacks.onStateChange('listening');
     this.callbacks.onTranscriptUpdate('');
     this.startAmplitudeLoop('mic');
@@ -200,9 +312,15 @@ export class EchoEngine {
           }
         }
 
-        const display = finalTranscript || interimTranscript;
-        if (display) {
-          this.callbacks.onTranscriptUpdate(display.trim());
+        // Show final text (once committed) in the main transcript
+        if (finalTranscript) {
+          this.liveFinalTranscript = finalTranscript;
+          this.callbacks.onTranscriptUpdate(finalTranscript.trim());
+          this.callbacks.onInterimTranscriptUpdate(''); // clear interim when final arrives
+        }
+        // Show interim (partial) text separately for live streaming display
+        if (interimTranscript) {
+          this.callbacks.onInterimTranscriptUpdate(interimTranscript.trim());
         }
       };
 
@@ -215,6 +333,20 @@ export class EchoEngine {
       recognition.onend = () => {
         if (this.currentState === 'listening' && this.liveRecognition) {
           try { recognition.start(); } catch (_) {}
+        }
+      };
+
+      // Web Speech API detects end-of-speech internally — use it
+      // to trigger onSpeechEnd faster than the VAD silence timer.
+      // The VAD timer (800ms) acts as a fallback if this doesn't fire.
+      recognition.onspeechend = () => {
+        if (this.currentState === 'listening') {
+          // Small delay to let any trailing final result arrive
+          setTimeout(() => {
+            if (this.currentState === 'listening') {
+              this.onSpeechEnd();
+            }
+          }, 50);
         }
       };
 
@@ -238,7 +370,7 @@ export class EchoEngine {
   private watchForSpeech() {
     const dataArray = new Uint8Array(this.analyser!.frequencyBinCount);
     const SPEECH_THRESHOLD = 0.15;
-    const SILENCE_DURATION_MS = 1400;
+    const SILENCE_DURATION_MS = 800;
     let speechStarted = false;
 
     const check = () => {
@@ -279,39 +411,74 @@ export class EchoEngine {
       this.mediaRecorder?.stop();
     }
 
-    await this.delay(100);
+    // If we already have a transcript from Web Speech API, skip the delay
+    // and use it immediately
+    if (!this.liveFinalTranscript.trim() || this.liveFinalTranscript.trim().length < 2) {
+      // No live transcript — wait for mediaRecorder to finalize the buffer
+      await this.delay(50);
 
-    const blob = new Blob(this.chunks, { type: 'audio/webm;codecs=opus' });
-    const arrayBuffer = await blob.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
+      const blob = new Blob(this.chunks, { type: 'audio/webm;codecs=opus' });
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
 
-    try {
-      const transcript = await window.electronAPI.transcribeAudio(uint8Array);
-
-      if (!transcript || transcript.trim().length < 2) {
-        this.startListening();
-        return;
+      try {
+        const whisperResult = await window.electronAPI.transcribeAudio(uint8Array);
+        this.liveFinalTranscript = whisperResult;
+      } catch (e) {
+        console.error('Transcription error', e);
       }
-
-      const lower = transcript.toLowerCase();
-      if (this.isExitPhrase(lower)) {
-        this.callbacks.onExit();
-        return;
-      }
-
-      this.callbacks.onTranscriptUpdate(transcript);
-      this.callbacks.onStateChange('thinking');
-      await this.sendToAgent(transcript);
-    } catch (e) {
-      console.error('Transcription error', e);
-      this.startListening();
     }
+
+    let transcript = this.liveFinalTranscript.trim();
+
+    if (!transcript || transcript.trim().length < 2) {
+      this.startListening();
+      return;
+    }
+
+    const lower = transcript.toLowerCase();
+    if (this.isExitPhrase(lower)) {
+      this.callbacks.onExit();
+      return;
+    }
+
+    // Screen context: capture screenshot and prepend to agent prompt
+    if (this.isScreenContextPhrase(lower)) {
+      try {
+        const screenshot = await window.electronAPI.captureScreenshot();
+        if (screenshot?.path) {
+          transcript = `<file name="${screenshot.name}" path="${screenshot.path}" type="image">[Screenshot captured]</file>\n\n${transcript}`;
+          this.callbacks.onTranscriptUpdate('📸 Capturing screen...');
+        }
+      } catch (e) {
+        console.warn('[EchoEngine] Screenshot capture failed:', e);
+      }
+    }
+
+    this.callbacks.onTranscriptUpdate(transcript);
+    this.callbacks.onStateChange('thinking');
+    await this.sendToAgent(transcript);
   }
 
   private isExitPhrase(phrase: string) {
     const { echoExitWords } = useOverlayStore.getState() as any;
     const words = echoExitWords || ['goodbye', 'close', 'exit', 'stop reading'];
     return words.some((w: string) => phrase.includes(w));
+  }
+
+  /** Check for screen-context voice commands ("what am I looking at", "see my screen"). */
+  private isScreenContextPhrase(phrase: string): boolean {
+    const triggers = [
+      'what am i looking at',
+      'see my screen',
+      'look at my screen',
+      'screenshot',
+      'capture screen',
+      'what is on my screen',
+      'show me my screen',
+      'what do you see',
+    ];
+    return triggers.some(t => phrase.includes(t));
   }
 
   private async sendToAgent(text: string) {
@@ -322,36 +489,134 @@ export class EchoEngine {
       console.log('[EchoEngine] Sending to agent:', text);
       this.callbacks.onStateChange('thinking');
       
-      const timeoutPromise = new Promise<string>((_, reject) => {
-        setTimeout(() => reject(new Error('Timeout')), 60000);
-      });
-      
-      const responsePromise = window.electronAPI.echoSendMessage({ text });
-      const response = await Promise.race([responsePromise, timeoutPromise]);
-      
-      console.log('[EchoEngine] Agent response received:', response ? response.substring(0, 100) + '...' : 'NULL');
-      
-      if (!response || response.trim().length === 0) {
-        console.warn('[EchoEngine] Empty response, retrying once...');
-        await this.delay(500);
-        const retryResponse = await window.electronAPI.echoSendMessage({ text });
-        
-        if (!retryResponse || retryResponse.trim().length === 0) {
-          this.callbacks.onStateChange('listening');
-          this.callbacks.onTranscriptUpdate('');
-          this.callbacks.onAgentTextUpdate('');
-          return;
-        }
-        
-        this.callbacks.onStateChange('speaking');
-        this.callbacks.onAgentTextUpdate(retryResponse);
-        await this.streamTTSChunked(retryResponse);
-        return;
+      this.ttsCancelled = false;
+      this.ttsQueue = [];
+      this.startInterruptWatcher();
+
+      const voice = useOverlayStore.getState().echoTtsVoice;
+      const provider = useOverlayStore.getState().echoTtsProvider;
+
+      // Extract screenshot path from XML-wrapped text if present
+      let imagePath: string | undefined;
+      const fileMatch = text.match(/<file name="([^"]+)" path="([^"]+)" type="image">/);
+      if (fileMatch) {
+        imagePath = fileMatch[2];
       }
 
-      this.callbacks.onStateChange('speaking');
-      this.callbacks.onAgentTextUpdate(response);
-      await this.streamTTSChunked(response);
+      let fullResponse = '';
+      let currentBuffer = '';
+      let playQueuePromise: Promise<void> = Promise.resolve();
+
+      const unsubscribe = window.electronAPI.onEchoStreamChunk((chunk: string) => {
+        if (this.isDestroyed || this.ttsCancelled) return;
+        
+        fullResponse += chunk;
+        currentBuffer += chunk;
+        
+        // Tell renderer about new text so it updates the bubble
+        this.callbacks.onAgentTextUpdate(fullResponse);
+        
+        // Transition to speaking once we have content
+        
+        // Aggressively scan for sentence boundaries — every chunk arrival
+        // Also split at commas and colons for more frequent TTS chunks
+        const sentenceMatch = currentBuffer.match(/^([^.!?;]+[.!?;]\s*)/);
+        const clauseMatch = currentBuffer.match(/^([^,]+,\s*)/);
+        
+        let textToSpeak = '';
+        if (sentenceMatch && sentenceMatch[1].trim().length > 0) {
+          textToSpeak = sentenceMatch[1].trim();
+          currentBuffer = currentBuffer.substring(sentenceMatch[0].length);
+        } else if (currentBuffer.length > 80) {
+          // No sentence boundary but buffer is long — split at last natural break
+          const commaBreak = currentBuffer.lastIndexOf(', ');
+          const spaceBreak = currentBuffer.lastIndexOf(' ');
+          const breakPoint = commaBreak > 0 ? commaBreak + 2 : (spaceBreak > 0 ? spaceBreak + 1 : -1);
+          if (breakPoint > 0 && breakPoint < currentBuffer.length - 10) {
+            textToSpeak = currentBuffer.substring(0, breakPoint).trim();
+            currentBuffer = currentBuffer.substring(breakPoint);
+          } else {
+            // No good break — force-split at 80 chars
+            const forcePoint = Math.min(80, currentBuffer.length);
+            textToSpeak = currentBuffer.substring(0, forcePoint).trim();
+            currentBuffer = currentBuffer.substring(forcePoint);
+          }
+        }
+
+        if (textToSpeak.length > 0) {
+          const synthPromise = window.electronAPI.synthesizeSpeech({ text: textToSpeak, voice, provider });
+          
+          playQueuePromise = playQueuePromise.then(async () => {
+            if (this.ttsCancelled || this.isDestroyed) return;
+            try {
+              const audioArray: number[] = await synthPromise;
+              if (!audioArray || audioArray.length === 0) {
+                console.warn('[EchoEngine] TTS returned empty audio for chunk:', textToSpeak.substring(0, 40));
+                return;
+              }
+              
+              if (this.currentState !== 'speaking') {
+                this.callbacks.onStateChange('speaking');
+              }
+              
+              // Fire callback so renderer can sync word highlighting exactly when audio starts
+              this.callbacks.onTtsChunkStart(textToSpeak);
+              
+              const audioBuffer = new Uint8Array(audioArray).buffer;
+              const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+              await this.playChunk(blob, textToSpeak);
+            } catch (e) {
+              console.error('[EchoEngine] Chunk TTS error:', e);
+            }
+          });
+        }
+      });
+      
+      const timeoutPromise = new Promise<string>((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout')), 120000);
+      });
+      
+      try {
+        const responsePromise = window.electronAPI.echoSendMessage({ text, imagePath });
+        await Promise.race([responsePromise, timeoutPromise]);
+      } finally {
+        unsubscribe();
+      }
+      
+      // Speak any remaining buffer — this catches text without terminal punctuation
+      if (currentBuffer.trim().length > 0 && !this.ttsCancelled && !this.isDestroyed) {
+        const textToSpeak = currentBuffer.trim();
+        const synthPromise = window.electronAPI.synthesizeSpeech({ text: textToSpeak, voice, provider });
+        
+        playQueuePromise = playQueuePromise.then(async () => {
+          if (this.ttsCancelled || this.isDestroyed) return;
+          try {
+            const audioArray: number[] = await synthPromise;
+            if (!audioArray || audioArray.length === 0) return;
+            
+            if (this.currentState !== 'speaking') {
+              this.callbacks.onStateChange('speaking');
+            }
+            this.callbacks.onTtsChunkStart(textToSpeak);
+            
+            const audioBuffer = new Uint8Array(audioArray).buffer;
+            const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+            await this.playChunk(blob, textToSpeak);
+          } catch (e) {
+            console.error('[EchoEngine] Final chunk TTS error:', e);
+          }
+        });
+      }
+      
+      // Wait for ALL queued TTS chunks to finish playing
+      await playQueuePromise;
+      
+      this.stopInterruptWatcher();
+      if (!this.ttsCancelled && !this.isDestroyed) {
+        this.callbacks.onAmplitudeUpdate(0);
+        this.startListening();
+      }
+
     } catch (e: any) {
       console.error('[EchoEngine] Agent communication error:', e.message || e);
       this.callbacks.onStateChange('listening');
@@ -359,97 +624,6 @@ export class EchoEngine {
       this.callbacks.onAgentTextUpdate('');
       if (!this.isDestroyed) this.startListening();
     }
-  }
-
-  /**
-   * Stream TTS in sentence-sized chunks for lower latency.
-   * Splits text at sentence boundaries (.!?;) with a minimum chunk
-   * size of 40 chars, then sends each chunk to synthesize immediately.
-   * Audio is queued for gapless sequential playback.
-   */
-  private async streamTTSChunked(fullText: string) {
-    if (this.isDestroyed) return;
-
-    this.ttsCancelled = false;
-    this.ttsQueue = [];
-
-    // Split into sentence-boundary chunks
-    const chunks = this.splitIntoChunks(fullText);
-    
-    this.startInterruptWatcher();
-
-    const voice = useOverlayStore.getState().echoTtsVoice;
-    const provider = useOverlayStore.getState().echoTtsProvider;
-
-    // Fire off all chunk synthesis requests in parallel
-    const synthesizePromises = chunks.map(async (chunkText) => {
-      if (this.ttsCancelled || this.isDestroyed) return null;
-      try {
-        const audioArray: number[] = await window.electronAPI.synthesizeSpeech({ text: chunkText, voice, provider });
-        if (!audioArray || audioArray.length === 0) return null;
-        const audioBuffer = new Uint8Array(audioArray).buffer;
-        const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
-        return { blob, text: chunkText };
-      } catch (e) {
-        console.error('[EchoEngine] Chunk TTS error:', e);
-        return null;
-      }
-    });
-
-    // Play chunks as they arrive, in order
-    for (let i = 0; i < synthesizePromises.length; i++) {
-      if (this.ttsCancelled || this.isDestroyed) break;
-      
-      const result = await synthesizePromises[i];
-      if (!result || this.ttsCancelled || this.isDestroyed) break;
-      
-      await this.playChunk(result.blob, result.text);
-    }
-
-    // All chunks played (or cancelled)
-    this.stopInterruptWatcher();
-    if (!this.ttsCancelled && !this.isDestroyed) {
-      this.callbacks.onAmplitudeUpdate(0);
-      this.startListening();
-    }
-  }
-
-  /**
-   * Split text into sentence-sized chunks at natural boundaries.
-   * Minimum chunk size: 40 chars to avoid very short TTS calls.
-   */
-  private splitIntoChunks(text: string): string[] {
-    const chunks: string[] = [];
-    let current = '';
-    
-    // Split on sentence boundaries
-    const sentences = text.split(/(?<=[.!?;])\s+/);
-    
-    for (const sentence of sentences) {
-      if (current.length + sentence.length < 40) {
-        current += (current ? ' ' : '') + sentence;
-      } else if (current.length >= 40) {
-        chunks.push(current.trim());
-        current = sentence;
-      } else {
-        current += (current ? ' ' : '') + sentence;
-        if (current.length >= 40) {
-          chunks.push(current.trim());
-          current = '';
-        }
-      }
-    }
-    
-    if (current.trim()) {
-      chunks.push(current.trim());
-    }
-    
-    // Fallback: if no chunks were created, use the full text
-    if (chunks.length === 0) {
-      chunks.push(text.trim());
-    }
-    
-    return chunks;
   }
 
   /**

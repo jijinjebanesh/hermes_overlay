@@ -67,6 +67,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language }) => {
         {expanded && (
           <div className="code-block" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTop: 'none', margin: 0 }}>
             <div className="code-block-header">
+              <div className="code-block-dots">
+                <span className="code-block-dot code-block-dot--red" />
+                <span className="code-block-dot code-block-dot--yellow" />
+                <span className="code-block-dot code-block-dot--green" />
+              </div>
               {language && <span className="code-block-lang">{language}</span>}
               <button
                 className={`code-copy-btn${copied ? ' copied' : ''}`}
@@ -87,6 +92,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language }) => {
   return (
     <div className="code-block">
       <div className="code-block-header">
+        <div className="code-block-dots">
+          <span className="code-block-dot code-block-dot--red" />
+          <span className="code-block-dot code-block-dot--yellow" />
+          <span className="code-block-dot code-block-dot--green" />
+        </div>
         {language && <span className="code-block-lang">{language}</span>}
         <button
           className={`code-copy-btn${copied ? ' copied' : ''}`}

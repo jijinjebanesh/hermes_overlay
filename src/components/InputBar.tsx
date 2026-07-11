@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Square, ArrowUp, AudioLines } from 'lucide-react';
-import { useOverlayStore } from '../store/overlayStore';
+import { Square, ArrowUp, AudioLines, Zap } from 'lucide-react';
+import { useOverlayStore, generateId } from '../store/overlayStore';
 import { getElectronAPI } from '../hooks/useElectronAPI';
 import { AttachmentBar } from './input/AttachmentBar';
 import { AutocompleteMenu } from './input/AutocompleteMenu';
@@ -38,9 +38,28 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
   const [autocompleteQuery, setAutocompleteQuery] = useState('');
   const [isAutocompleteOpen, setIsAutocompleteOpen] = useState(false);
   const [lastWord, setLastWord] = useState('');
-
+  // Focus on mount
   useEffect(() => {
     inputRef.current?.focus();
+  }, [inputRef]);
+
+  // Listen for external "edit message" requests from Conversation
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string;
+      setInput(detail);
+      setHistoryIndex(-1);
+      setTimeout(() => {
+        inputRef.current?.focus();
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
+          const sh = inputRef.current.scrollHeight;
+          inputRef.current.style.height = Math.min(sh, 96) + 'px';
+        }
+      }, 50);
+    };
+    window.addEventListener('hermes-edit-message', handler);
+    return () => window.removeEventListener('hermes-edit-message', handler);
   }, [inputRef]);
 
   useEffect(() => {
@@ -196,7 +215,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       if (!trimmed) return;
       addToHistory(trimmed);
       addMessage({
-        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        id: generateId(),
         role: 'user',
         content: trimmed,
         timestamp: Date.now(),
@@ -236,13 +255,13 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       if (targetPath.startsWith("'") && targetPath.endsWith("'")) targetPath = targetPath.slice(1, -1);
       
       addMessage({
-        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        id: generateId(),
         role: 'user',
         content: trimmed,
         timestamp: Date.now(),
       });
       addMessage({
-        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        id: generateId(),
         role: 'assistant',
         content: `Opening ${targetPath}...`,
         timestamp: Date.now(),
@@ -301,7 +320,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     if (trimmed === '/history') {
       const history = useOverlayStore.getState().inputHistory;
       addMessage({
-        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        id: generateId(),
         role: 'assistant',
         content: history.length > 0
           ? 'Recent commands:\n' + history.slice(0, 10).map((h, i) => `${i + 1}. ${h}`).join('\n')
@@ -316,7 +335,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     if (trimmed === '/branch') {
       const currentMessages = [...useOverlayStore.getState().messages];
       newSession();
-      currentMessages.forEach((m) => addMessage({ ...m, id: crypto.randomUUID?.() || Math.random().toString(36).substring(2) }));
+      currentMessages.forEach((m) => addMessage({ ...m, id: generateId() }));
       setInput('');
       resetTextarea();
       return;
@@ -324,7 +343,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
 
     if (localMode) {
       addMessage({
-        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        id: generateId(),
         role: 'user',
         content: trimmed,
         attachments: pendingAttachments.length > 0 ? [...pendingAttachments] : undefined,
@@ -375,7 +394,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     const fullPayload = attachmentContext + trimmed;
 
     addMessage({
-      id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+      id: generateId(),
       role: 'user',
       content: trimmed,
       attachments: attachmentPayload,
@@ -383,7 +402,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     });
 
     addMessage({
-      id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+      id: generateId(),
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
@@ -440,7 +459,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
             ...fileResult,
             ext: fileResult.ext || '',
             isImage: fileResult.isImage || false,
-            id: crypto.randomUUID?.() || Math.random().toString(36).substring(2)
+            id: generateId()
           }]);
         }
       }
@@ -460,7 +479,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
             ...fileResult,
             ext: fileResult.ext || '',
             isImage: fileResult.isImage || false,
-            id: crypto.randomUUID?.() || Math.random().toString(36).substring(2)
+            id: generateId()
           }]);
         }
       } else {
@@ -468,6 +487,31 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       }
     } catch (e) {
       showReject('Screenshot error');
+    }
+  };
+
+  const handleClipboardPaste = async () => {
+    setShowAttachMenu(false);
+    try {
+      const text = await api?.readClipboard?.();
+      if (!text || !text.trim()) {
+        showReject('Clipboard is empty');
+        return;
+      }
+      // Attach clipboard text as a synthetic file
+      const hash = text.substring(0, 40).replace(/[^a-zA-Z0-9]/g, '_') + '_clipboard';
+      addPendingAttachments([{
+        name: 'Clipboard.txt',
+        path: `clipboard://${hash}`,
+        content: text,
+        tooBig: text.length > 100_000,
+        size: text.length,
+        ext: 'txt',
+        isImage: false,
+        id: generateId(),
+      }]);
+    } catch (e) {
+      showReject('Failed to read clipboard');
     }
   };
 
@@ -481,6 +525,38 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       setEchoTooltip('Echo Mode not available');
       setTimeout(() => setEchoTooltip(null), 2000);
     }
+  };
+
+  const handleBackgroundSend = () => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+
+    addMessage({
+      id: generateId(),
+      role: 'user',
+      content: trimmed,
+      timestamp: Date.now(),
+    });
+
+    addMessage({
+      id: generateId(),
+      role: 'assistant',
+      content: '⏳ Running in background... You\'ll get a notification when it\'s done.',
+      timestamp: Date.now(),
+    });
+
+    const state = useOverlayStore.getState();
+    api?.dispatchBackground?.({
+      text: trimmed,
+      sessionId: undefined, // fresh session for background tasks
+      provider: state.activeProvider,
+      model: state.activeModel,
+    });
+
+    setInput('');
+    clearPendingAttachments();
+    resetTextarea();
+    api?.closeOverlay?.(); // dismiss overlay — user goes back to work
   };
 
   const hasContent = input.trim().length > 0 || pendingAttachments.length > 0;
@@ -497,6 +573,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         onClose={() => setShowAttachMenu(false)}
         onAttachFile={handleAttachFile}
         onScreenshot={handleScreenshot}
+        onClipboardPaste={handleClipboardPaste}
       />
 
       <div className="input-content-col">
@@ -537,6 +614,17 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         >
           <AudioLines size={16} strokeWidth={2} />
         </button>
+
+        {!streamState.isStreaming && hasContent && (
+          <button
+            className="echo-mode-btn"
+            onClick={handleBackgroundSend}
+            title="Run in Background"
+            aria-label="Run in background"
+          >
+            <Zap size={15} strokeWidth={2} />
+          </button>
+        )}
   
         {streamState.isStreaming && (
           <button
@@ -563,8 +651,8 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
           position: 'absolute',
           bottom: '70px',
           right: '60px',
-          background: 'var(--bg-primary)',
-          border: '1px solid var(--border)',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-primary)',
           padding: '6px 10px',
           borderRadius: '6px',
           fontSize: '12px',

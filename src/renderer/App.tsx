@@ -1,9 +1,10 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
+import { FolderOpen } from 'lucide-react';
 import { Header } from '../components/Header';
 import { Conversation } from '../components/Conversation';
 import { InputBar } from '../components/InputBar';
 import { SettingsModal } from '../components/SettingsModal';
-import { useOverlayStore } from '../store/overlayStore';
+import { useOverlayStore, generateId } from '../store/overlayStore';
 import type { StreamSegment } from '../store/overlayStore';
 import { EchoMode } from '../components/EchoMode';
 import type { EchoSessionTurn } from '../hooks/useEchoSession';
@@ -39,7 +40,8 @@ export const App: React.FC = () => {
     theme,
     accentColor,
     fontFamily,
-
+    smallWindow,
+    cycleToolMode,
   } = useOverlayStore();
 
   const [isVisible, setIsVisible] = useState(true);
@@ -54,9 +56,19 @@ export const App: React.FC = () => {
       document.documentElement.style.setProperty('--font-sans', fontFamily);
     }
 
-    // Accent Color
+    // Accent Color — map named color to hex and set CSS custom property
     if (accentColor) {
       document.documentElement.setAttribute('data-accent', accentColor);
+      const ACCENT_HEX: Record<string, string> = {
+        blue:   '#0A84FF',
+        purple: '#BF5AF2',
+        pink:   '#FF375F',
+        red:    '#FF453A',
+        orange: '#FF9F0A',
+        green:  '#30D158',
+      };
+      const hex = ACCENT_HEX[accentColor] || ACCENT_HEX.blue;
+      document.documentElement.style.setProperty('--accent-primary', hex);
     }
 
 
@@ -116,6 +128,49 @@ export const App: React.FC = () => {
         setIsVisible(visible);
         if (visible) {
           focusInput();
+
+          // ── Auto-Context Capture (Screen & App Awareness) ──
+          // When overlay is summoned, silently grab screenshot + clipboard
+          // so they're available as context without manual copy-paste.
+          const state = useOverlayStore.getState();
+          if (state.autoCaptureContext && api.captureContext) {
+            // Small delay so the overlay is fully rendered before hiding for screenshot
+            setTimeout(async () => {
+              try {
+                const ctx = await api.captureContext!();
+                if (!ctx) return;
+
+                // Auto-attach clipboard text if present
+                if (ctx.clipboardText) {
+                  useOverlayStore.getState().addPendingAttachments([{
+                    id: generateId(),
+                    name: 'Clipboard.txt',
+                    path: `clipboard://auto_${Date.now()}`,
+                    content: ctx.clipboardText,
+                    tooBig: ctx.clipboardText.length > 100_000,
+                    size: ctx.clipboardText.length,
+                    ext: 'txt',
+                    isImage: false,
+                  }]);
+                }
+
+                // Auto-attach screenshot if present
+                if (ctx.screenshot) {
+                  const fileResult = await api.readDroppedFile(ctx.screenshot.path);
+                  if (fileResult) {
+                    useOverlayStore.getState().addPendingAttachments([{
+                      ...fileResult,
+                      ext: fileResult.ext || 'png',
+                      isImage: true,
+                      id: generateId(),
+                    }]);
+                  }
+                }
+              } catch (e) {
+                console.error('[AutoContext] Capture failed:', e);
+              }
+            }, 50);
+          }
         } else {
           setIsEchoMode(false); // Close Echo mode when hidden
         }
@@ -150,10 +205,14 @@ export const App: React.FC = () => {
     if (api.onStreamError) {
       cleanups.push(api.onStreamError((error: string) => {
         setStreamState({ isStreaming: false });
+        const isENOENT = error.includes('ENOENT') || error.includes('spawn hermes');
+        const friendly = isENOENT
+          ? 'Hermes CLI not found. Install it with `npm install -g @anthropic/hermes` or add it to your PATH.'
+          : `Error: ${error}`;
         addMessage({
-          id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+          id: generateId(),
           role: 'assistant',
-          content: `Error: ${error}`,
+          content: friendly,
           timestamp: Date.now(),
         });
       }));
@@ -166,12 +225,51 @@ export const App: React.FC = () => {
       }));
     }
 
+    // Push-to-Talk handler — toggles recording on Ctrl+Space
+    if (api.onPushToTalkStart) {
+      cleanups.push(api.onPushToTalkStart(() => {
+        // Dispatch custom event so EchoMode picks it up
+        window.dispatchEvent(new CustomEvent('push-to-talk-toggle'));
+      }));
+    }
+
+    // Background task updates
+    if (api.onBackgroundTaskUpdate) {
+      cleanups.push(api.onBackgroundTaskUpdate((task: any) => {
+        const state = useOverlayStore.getState();
+        const existing = state.backgroundTasks.find((t: any) => t.id === task.id);
+        if (existing) {
+          state.updateBackgroundTask(task);
+        } else {
+          state.addBackgroundTask(task);
+        }
+      }));
+    }
+
+    // Background task clicked in notification — show the result
+    if (api.onBackgroundTaskClicked) {
+      cleanups.push(api.onBackgroundTaskClicked((taskId: string) => {
+        const state = useOverlayStore.getState();
+        const task = state.backgroundTasks.find((t: any) => t.id === taskId);
+        if (task && task.status === 'completed') {
+          // Display the task result as an assistant message
+          state.addMessage({
+            id: generateId(),
+            role: 'assistant',
+            content: `**Background Task Complete**\n\n${task.output || '(no output)'}`,
+            timestamp: Date.now(),
+          });
+        }
+      }));
+    }
+
     return () => cleanups.forEach(fn => fn());
   }, [addMessage, appendSegmentToLast, focusInput, setStreamState, updateLastMessage]);
 
-  // ── ⌘⇧E / Ctrl+Shift+E to enter Echo mode ──
+  // ── Keyboard Shortcuts (Echo Mode & Tool Mode) ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // ⌘⇧E / Ctrl+Shift+E for Echo mode
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'e') {
         e.preventDefault();
         if (isEchoMode) {
@@ -181,10 +279,16 @@ export const App: React.FC = () => {
           enterEchoMode();
         }
       }
+      
+      // Ctrl+T to cycle Tool Mode
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't' && !e.shiftKey) {
+        e.preventDefault();
+        cycleToolMode();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isEchoMode]);
+  }, [isEchoMode, cycleToolMode]);
 
   // Stream duration timer
   useEffect(() => {
@@ -272,7 +376,7 @@ export const App: React.FC = () => {
         const result = await api.readDroppedFile(filePath);
         return {
           ...result,
-          id: crypto.randomUUID?.() || Math.random().toString(36).substring(2)
+          id: generateId()
         };
       } catch (e) {
         console.error('Failed to read dropped file:', e);
@@ -292,19 +396,21 @@ export const App: React.FC = () => {
   const enterEchoMode = useCallback(() => {
     echoStartTimeRef.current = Date.now();
     setEchoTransitioning(true);
-    // Phase 1: dissolve chat (200ms), then show Echo
+    // Phase 1: chat fades up & blurs out (250ms)
+    // EchoMode container fades in concurrently with orb rising from bottom
     setTimeout(() => {
       setIsEchoMode(true);
-    }, 150);
+    }, 250);
   }, []);
 
   const handleEchoExit = useCallback((sessionTranscript?: EchoSessionTurn[]) => {
     setIsEchoMode(false);
-    // Phase 2: restore chat surface
+    // Phase 2: Echo fades out, chat restores (300ms blur dissolve)
     setTimeout(() => {
       setEchoTransitioning(false);
       focusInput();
-    }, 200);
+    }, 300);
+    // ...merge transcript (unchanged)...
 
     // Merge transcript into conversation if there were exchanges
     if (sessionTranscript && sessionTranscript.length > 0) {
@@ -320,7 +426,7 @@ export const App: React.FC = () => {
       ).join('\n\n');
 
       addMessage({
-        id: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+        id: generateId(),
         role: 'assistant',
         content: `🎙 **Echo Session** · ${durationStr} · ${exchanges} exchange${exchanges !== 1 ? 's' : ''}\n\n${transcriptLines}`,
         timestamp: Date.now(),
@@ -331,7 +437,7 @@ export const App: React.FC = () => {
   const showDragOverlay = isDragging;
   const shellClasses = [
     'overlay-shell',
-    useOverlayStore.getState().smallWindow ? 'small-mode' : '',
+    smallWindow ? 'small-mode' : '',
     !isVisible ? 'hidden' : '',
     echoTransitioning ? 'echo-dissolve' : '',
   ].filter(Boolean).join(' ');
@@ -346,22 +452,13 @@ export const App: React.FC = () => {
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           style={{
-            ...(echoTransitioning && !isEchoMode ? {
-              opacity: 0,
-              transform: 'translateY(-8px)',
-              transition: 'opacity 200ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1)',
-            } : echoTransitioning ? {
-              opacity: 0,
-              transform: 'translateY(-8px)',
-              pointerEvents: 'none' as const,
-              transition: 'opacity 200ms cubic-bezier(0.4, 0, 1, 1), transform 200ms cubic-bezier(0.4, 0, 1, 1)',
-            } : {})
-          }}
+                      ...(echoTransitioning ? { pointerEvents: 'none' as const } : {})
+                    }}
         >
           {showDragOverlay && (
             <div className="global-drag-overlay">
               <div className="global-drag-content">
-                <div className="global-drag-icon">📁</div>
+                <div className="global-drag-icon"><FolderOpen size={32} strokeWidth={1.5} /></div>
                 <h2>Drop file to attach</h2>
                 <p>Images, documents, code, and more</p>
               </div>

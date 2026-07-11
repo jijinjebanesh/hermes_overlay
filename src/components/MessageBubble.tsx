@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
-import { Copy, RotateCw, Edit2, Check } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Copy, RotateCw, Edit2, Check, Volume2, Square } from 'lucide-react';
 import { Message } from '../store/overlayStore';
 import { AttachmentChip } from './AttachmentChip';
-import { CodeBlock } from './message/CodeBlock';
+import { AttachmentGallery } from './message/AttachmentGallery';
+import { MarkdownContent } from './message/MarkdownContent';
 import { DiffBlock } from './message/DiffBlock';
 import { ToolActivityPill } from './message/ToolActivityPill';
 import { ThinkingBlock } from './message/ThinkingBlock';
 import { ToolCallBlock } from './message/ToolCallBlock';
+import { getElectronAPI } from '../hooks/useElectronAPI';
+
+const api = getElectronAPI();
 
 interface MessageBubbleProps {
   message: Message;
@@ -14,8 +18,10 @@ interface MessageBubbleProps {
   onEdit?: () => void;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRetry, onEdit }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message, onRetry, onEdit }) => {
   const [copied, setCopied] = useState(false);
+  const [isReadingAloud, setIsReadingAloud] = useState(false);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const handleCopyText = () => {
     let textToCopy = message.content || '';
@@ -30,31 +36,97 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRetry, 
     });
   };
 
-  // Parse content: extract ```code blocks``` from text
-  const renderTextContent = (content: string) => {
-    if (!content) return null;
-    const parts = content.split(/(```[\s\S]*?```)/g);
+  const handleReadAloud = () => {
+    if (isReadingAloud && ttsAudioRef.current) {
+      ttsAudioRef.current.pause();
+      ttsAudioRef.current.currentTime = 0;
+      ttsAudioRef.current = null;
+      setIsReadingAloud(false);
+      return;
+    }
 
-    return parts.map((part, i) => {
-      if (part.startsWith('```') && part.endsWith('```')) {
-        const lines = part.slice(3, -3).split('\n');
-        let language = '';
-        if (lines[0] && !lines[0].includes(' ')) {
-          language = lines.shift() || '';
-        }
-        return <CodeBlock key={i} code={lines.join('\n').trim()} language={language} />;
-      }
-      if (!part.trim()) return null;
-      return (
-        <span
-          key={i}
-          className="selectable"
-          style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-        >
-          {part}
-        </span>
-      );
+    let textToRead = message.content || '';
+    if (!textToRead && message.segments) {
+      const textSegments = message.segments.filter(s => s.type === 'text');
+      textToRead = textSegments.map(s => s.content).join('\n\n');
+    }
+    if (!textToRead.trim()) return;
+
+    api?.synthesizeSpeech?.({ text: textToRead }).then((audioArray: number[]) => {
+      if (!audioArray || audioArray.length === 0) return;
+      const audioBuffer = new Uint8Array(audioArray).buffer;
+      const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      ttsAudioRef.current = audio;
+      audio.onended = () => {
+        setIsReadingAloud(false);
+        URL.revokeObjectURL(audioUrl);
+        ttsAudioRef.current = null;
+      };
+      audio.onerror = () => {
+        setIsReadingAloud(false);
+        URL.revokeObjectURL(audioUrl);
+        ttsAudioRef.current = null;
+      };
+      audio.play().catch(() => {
+        setIsReadingAloud(false);
+        URL.revokeObjectURL(audioUrl);
+        ttsAudioRef.current = null;
+      });
+      setIsReadingAloud(true);
+    }).catch(() => {
+      setIsReadingAloud(false);
     });
+  };
+
+  /**
+   * Live output arrives line-by-line; history usually arrives as one text segment.
+   * Buffer adjacent text segments so both paths are parsed as the same Markdown
+   * document—necessary for GFM constructs such as tables and nested lists.
+   */
+  const renderStructuredSegments = () => {
+    if (!message.segments) return null;
+
+    const rendered: React.ReactNode[] = [];
+    let textBuffer: string[] = [];
+    let textGroup = 0;
+
+    const flushText = () => {
+      const content = textBuffer.join('\n').trim();
+      if (content) {
+        rendered.push(
+          <div key={`text-${textGroup++}`} className="message-assistant selectable">
+            <MarkdownContent content={content} />
+          </div>
+        );
+      }
+      textBuffer = [];
+    };
+
+    message.segments.forEach((seg, idx) => {
+      if (seg.type === 'text') {
+        textBuffer.push(seg.content);
+        return;
+      }
+
+      flushText();
+      switch (seg.type) {
+        case 'tool_activity':
+          rendered.push(<ToolActivityPill key={`tool-${idx}`} segment={seg} />);
+          break;
+        case 'diff':
+          rendered.push(<DiffBlock key={`diff-${idx}`} content={seg.content} />);
+          break;
+        case 'thinking':
+          rendered.push(<ThinkingBlock key={`thinking-${idx}`} content={seg.content} />);
+          break;
+        // session_info is internal metadata and deliberately remains hidden.
+      }
+    });
+
+    flushText();
+    return rendered;
   };
 
   const renderMessageActions = () => (
@@ -66,6 +138,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRetry, 
       >
         {copied ? <Check size={12} /> : <Copy size={12} />}
       </button>
+      {message.role === 'assistant' && (
+        <button
+          className="message-action-btn"
+          onClick={handleReadAloud}
+          title={isReadingAloud ? 'Stop reading' : 'Read aloud'}
+        >
+          {isReadingAloud ? <Square size={11} fill="currentColor" /> : <Volume2 size={12} />}
+        </button>
+      )}
       {onEdit && message.role === 'user' && (
         <button 
           className="message-action-btn" 
@@ -93,11 +174,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRetry, 
       <div className="message-user-row message-row">
         <div className="message-user-bubble selectable">
           {message.attachments && message.attachments.length > 0 && (
-            <div className="message-attachments">
-              {message.attachments.map((file) => (
-                <AttachmentChip key={file.id} file={file} variant="sent" />
-              ))}
-            </div>
+            <>
+              {/* Gallery for images when >1 image */}
+              {message.attachments.filter(f => f.isImage).length > 1 && (
+                <AttachmentGallery files={message.attachments} />
+              )}
+              {/* Chips for single images and all non-image files */}
+              {(message.attachments.filter(f => f.isImage).length <= 1 || message.attachments.some(f => !f.isImage)) && (
+                <div className="message-attachments">
+                  {message.attachments.map((file) => (
+                    <AttachmentChip key={file.id} file={file} variant="sent" />
+                  ))}
+                </div>
+              )}
+            </>
           )}
           {message.content}
           
@@ -121,29 +211,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRetry, 
   return (
     <div className="message-row" style={{ display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}>
       {/* Render structured segments if available */}
-      {hasSegments && message.segments!.map((seg, idx) => {
-        switch (seg.type) {
-          case 'tool_activity':
-            return <ToolActivityPill key={idx} segment={seg} />;
-          case 'diff':
-            return <DiffBlock key={idx} content={seg.content} />;
-          case 'thinking':
-            return <ThinkingBlock key={idx} content={seg.content} />;
-          case 'text':
-            return (
-              <div key={idx} className="message-assistant selectable">
-                {renderTextContent(seg.content)}
-              </div>
-            );
-          default:
-            return null;
-        }
-      })}
+      {renderStructuredSegments()}
 
       {/* Fallback: render plain content if no segments */}
       {!hasSegments && message.content && (
         <div className="message-assistant selectable">
-          {renderTextContent(message.content)}
+          <MarkdownContent content={message.content} />
         </div>
       )}
 
@@ -162,4 +235,4 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRetry, 
       )}
     </div>
   );
-};
+});

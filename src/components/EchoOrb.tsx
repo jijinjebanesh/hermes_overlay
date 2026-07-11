@@ -134,6 +134,23 @@ export const EchoOrb: React.FC<EchoOrbProps> = ({ state, amplitude, compact = fa
     }
   }, [muted]);
 
+  // Sync pixel resolution when compact prop changes.
+  // The CSS width: 220px / 120px drives the visual size with spring transition;
+  // canvas.width must match for crisp rendering — updated with debounce
+  // to settle at the transition endpoint.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    // Debounce: wait for CSS spring transition to settle (~550ms)
+    const t = setTimeout(() => {
+      if (!canvasRef.current) return;
+      const targetSize = compact ? 160 : 280;
+      canvasRef.current.width = targetSize;
+      canvasRef.current.height = targetSize;
+    }, 550);
+    return () => clearTimeout(t);
+  }, [compact]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -144,7 +161,8 @@ export const EchoOrb: React.FC<EchoOrbProps> = ({ state, amplitude, compact = fa
       const isComp = compactRef.current;
       const targetSize = isComp ? 160 : 280;
       
-      if (canvas.width !== targetSize) {
+      // Only set pixel size on first mount; resize is handled by CSS transition + effect above
+      if (canvas.width === 0) {
         canvas.width = targetSize;
         canvas.height = targetSize;
       }

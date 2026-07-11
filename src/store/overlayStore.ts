@@ -119,6 +119,13 @@ interface OverlayState {
   echoWakeWord: string;
   echoDoubleClapMinimize: boolean;
 
+  // Screen awareness
+  autoCaptureContext: boolean;
+  autoCaptureScreenshot: boolean;
+
+  // Background tasks
+  backgroundTasks: any[];
+
   // Actions
   setSettingsOpen: (isOpen: boolean) => void;
   setSettingsSidebarCollapsed: (collapsed: boolean) => void;
@@ -140,11 +147,19 @@ interface OverlayState {
   setEchoWakeWordEnabled: (enabled: boolean) => void;
   setEchoWakeWord: (word: string) => void;
   setEchoDoubleClapMinimize: (enabled: boolean) => void;
+  setAutoCaptureContext: (enabled: boolean) => void;
+  setAutoCaptureScreenshot: (enabled: boolean) => void;
+  setBackgroundTasks: (tasks: any[]) => void;
+  addBackgroundTask: (task: any) => void;
+  updateBackgroundTask: (task: any) => void;
+  clearBackgroundTask: (taskId: string) => void;
   setToolMode: (mode: ToolMode) => void;
-  
+
   addMessage: (msg: Message) => void;
   updateLastMessage: (updater: (msg: Message) => Message) => void;
   appendSegmentToLast: (segment: StreamSegment) => void;
+  editFromMessage: (messageId: string) => string | null;
+  retryFromMessage: (messageId: string) => string | null;
   clearSession: () => void;
   newSession: () => void;
   hydrateSession: (sessionId: string, messages: Message[]) => void;
@@ -167,7 +182,7 @@ interface OverlayState {
    HELPERS
    ═══════════════════════════════════════════════ */
 
-const generateId = () =>
+export const generateId = () =>
   crypto.randomUUID?.() || Math.random().toString(36).substring(2, 15);
 
 
@@ -210,7 +225,7 @@ export const useOverlayStore = create<OverlayState>()(
       smallWindow: false,
       theme: 'system',
       accentColor: 'blue',
-      fontFamily: 'Inter',
+      fontFamily: 'system-ui',
 
       echoClapWakeEnabled: true,
       echoVoiceModeEnabled: false,
@@ -222,6 +237,9 @@ export const useOverlayStore = create<OverlayState>()(
       echoWakeWordEnabled: false,
       echoWakeWord: 'hey hermes',
       echoDoubleClapMinimize: false,
+      autoCaptureContext: true as boolean,
+      autoCaptureScreenshot: false as boolean,
+      backgroundTasks: [] as any[],
 
       /* ── Actions ── */
 
@@ -283,6 +301,35 @@ export const useOverlayStore = create<OverlayState>()(
       clearSession: () =>
         set({ messages: [], sessionId: generateId() }),
 
+      editFromMessage: (messageId) => {
+        const state = get();
+        const idx = state.messages.findIndex((m) => m.id === messageId);
+        if (idx === -1) return null;
+        const msg = state.messages[idx];
+        if (msg.role !== 'user') return null;
+        set({ messages: state.messages.slice(0, idx) });
+        return msg.content;
+      },
+
+      retryFromMessage: (messageId) => {
+        const state = get();
+        const idx = state.messages.findIndex((m) => m.id === messageId);
+        if (idx === -1) return null;
+        const msg = state.messages[idx];
+        if (msg.role !== 'assistant') return null;
+        // Find the preceding user message
+        let userContent: string | null = null;
+        for (let i = idx - 1; i >= 0; i--) {
+          if (state.messages[i].role === 'user') {
+            userContent = state.messages[i].content;
+            // Remove everything from the user message onward
+            set({ messages: state.messages.slice(0, i) });
+            break;
+          }
+        }
+        return userContent;
+      },
+
       newSession: () =>
         set({ messages: [], sessionId: generateId() }),
 
@@ -296,7 +343,7 @@ export const useOverlayStore = create<OverlayState>()(
 
       cycleToolMode: () =>
         set((state) => {
-          const modes: ToolMode[] = ['all', 'none', 'terminal'];
+          const modes: ToolMode[] = ['all', 'terminal', 'none'];
           const nextIndex = (modes.indexOf(state.toolMode) + 1) % modes.length;
           return { toolMode: modes[nextIndex] };
         }),
@@ -326,7 +373,10 @@ export const useOverlayStore = create<OverlayState>()(
           };
         }),
 
-      setEchoClapWakeEnabled: (enabled) => set({ echoClapWakeEnabled: enabled }),
+      setEchoClapWakeEnabled: (enabled) => {
+        set({ echoClapWakeEnabled: enabled });
+        window.electronAPI?.echoSettingsChanged?.({ echoClapWakeEnabled: enabled });
+      },
       setEchoInterruptWords: (words) => set({ echoInterruptWords: words }),
       setEchoExitWords: (words) => set({ echoExitWords: words }),
 
@@ -334,27 +384,57 @@ export const useOverlayStore = create<OverlayState>()(
         set((state) => ({
           pendingAttachments: [...state.pendingAttachments, ...files]
         })),
-      
+
       removePendingAttachment: (fileId) =>
         set((state) => ({
           pendingAttachments: state.pendingAttachments.filter(f => f.id !== fileId)
         })),
-      
+
       clearPendingAttachments: () => set({ pendingAttachments: [] }),
 
-      setEchoVoiceModeEnabled: (enabled) => set({ echoVoiceModeEnabled: enabled }),
-      
-      setEchoClapSensitivity: (sensitivity) => set({ echoClapSensitivity: sensitivity }),
-      
+      setEchoVoiceModeEnabled: (enabled) => {
+        set({ echoVoiceModeEnabled: enabled });
+        window.electronAPI?.echoSettingsChanged?.({ echoVoiceModeEnabled: enabled });
+      },
+
+      setEchoClapSensitivity: (sensitivity) => {
+        set({ echoClapSensitivity: sensitivity });
+        window.electronAPI?.echoSettingsChanged?.({ echoClapSensitivity: sensitivity });
+      },
+
       setEchoTtsProvider: (provider) => set({ echoTtsProvider: provider }),
-      
+
       setEchoTtsVoice: (voice) => set({ echoTtsVoice: voice }),
-        
-      setEchoWakeWordEnabled: (enabled) => set({ echoWakeWordEnabled: enabled }),
-        
-      setEchoWakeWord: (word) => set({ echoWakeWord: word }),
-        
-      setEchoDoubleClapMinimize: (enabled) => set({ echoDoubleClapMinimize: enabled }),
+
+      setEchoWakeWordEnabled: (enabled) => {
+        set({ echoWakeWordEnabled: enabled });
+        window.electronAPI?.echoSettingsChanged?.({ echoWakeWordEnabled: enabled });
+      },
+
+      setEchoWakeWord: (word) => {
+        set({ echoWakeWord: word });
+        window.electronAPI?.echoSettingsChanged?.({ echoWakeWord: word });
+      },
+
+      setEchoDoubleClapMinimize: (enabled) => {
+        set({ echoDoubleClapMinimize: enabled });
+        window.electronAPI?.echoSettingsChanged?.({ echoDoubleClapMinimize: enabled });
+      },
+
+      setAutoCaptureContext: (enabled) => set({ autoCaptureContext: enabled }),
+      setAutoCaptureScreenshot: (enabled) => set({ autoCaptureScreenshot: enabled }),
+      setBackgroundTasks: (tasks) => set({ backgroundTasks: tasks }),
+      addBackgroundTask: (task) => set((state) => ({
+        backgroundTasks: [task, ...state.backgroundTasks].slice(0, 50),
+      })),
+      updateBackgroundTask: (task) => set((state) => ({
+        backgroundTasks: state.backgroundTasks.map((t) =>
+          t.id === task.id ? task : t
+        ),
+      })),
+      clearBackgroundTask: (taskId) => set((state) => ({
+        backgroundTasks: state.backgroundTasks.filter((t) => t.id !== taskId),
+      })),
     }),
     {
       name: 'hermes-overlay-storage',
@@ -383,6 +463,8 @@ export const useOverlayStore = create<OverlayState>()(
         echoTtsProvider: state.echoTtsProvider,
         echoTtsVoice: state.echoTtsVoice,
         echoDoubleClapMinimize: state.echoDoubleClapMinimize,
+        autoCaptureContext: state.autoCaptureContext,
+        autoCaptureScreenshot: state.autoCaptureScreenshot,
       }),
     }
   )

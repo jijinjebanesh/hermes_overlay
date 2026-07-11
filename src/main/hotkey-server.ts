@@ -4,29 +4,59 @@
  */
 
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { app } from 'electron';
 import { toggleVisibility, getMainWindow, getIsVisible } from './window';
 
 let server: http.Server | null = null;
+let authToken: string = '';
 
 export function startHotkeyServer() {
+  // Generate token and write to disk for scripts to read
+  authToken = crypto.randomBytes(32).toString('hex');
+  const tokenPath = path.join(app.getPath('userData'), '.hotkey-token');
+  try {
+    fs.writeFileSync(tokenPath, authToken, { mode: 0o600 });
+  } catch (err) {
+    console.error('Failed to write hotkey token:', err);
+  }
+
   server = http.createServer((req, res) => {
-    if (req.url === '/toggle' && req.method === 'POST') {
-      toggleVisibility();
-      res.writeHead(200);
-      res.end('OK');
-    } else if (req.url === '/show' && req.method === 'POST') {
-      if (!getIsVisible() && getMainWindow() && !getMainWindow()!.isDestroyed()) {
-        toggleVisibility();
+    try {
+      const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+      
+      // Verify token
+      const authHeader = req.headers.authorization || '';
+      const queryToken = url.searchParams.get('token');
+      if (authHeader !== `Bearer ${authToken}` && queryToken !== authToken) {
+        res.writeHead(401);
+        res.end('Unauthorized');
+        return;
       }
-      res.writeHead(200);
-      res.end('OK');
-    } else {
-      res.writeHead(404);
-      res.end();
+
+      if (url.pathname === '/toggle' && req.method === 'POST') {
+        toggleVisibility();
+        res.writeHead(200);
+        res.end('OK');
+      } else if (url.pathname === '/show' && req.method === 'POST') {
+        if (!getIsVisible() && getMainWindow() && !getMainWindow()!.isDestroyed()) {
+          toggleVisibility();
+        }
+        res.writeHead(200);
+        res.end('OK');
+      } else {
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    } catch (e) {
+      res.writeHead(400);
+      res.end('Bad Request');
     }
   });
 
-  server.listen(34567, 'localhost', () => {
+  server.listen(34567, '127.0.0.1', () => {
     console.log('✓ Toggle server listening on port 34567');
   });
 }
