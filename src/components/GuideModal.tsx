@@ -69,6 +69,10 @@ export const GuideModal: React.FC = () => {
                   <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Voice Mode</span>
                   <kbd style={{ background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-secondary)', fontSize: '12px', color: 'var(--text-muted)' }}>Ctrl + E</kbd>
                 </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Quit Completely</span>
+                  <kbd style={{ background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-secondary)', fontSize: '12px', color: 'var(--text-muted)' }}>Ctrl + Shift + F4</kbd>
+                </div>
               </div>
             </div>
 

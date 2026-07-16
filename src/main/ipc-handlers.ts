@@ -56,7 +56,7 @@ function updateAhkScript(electronHotkey: string) {
 
   const keyMapped = key.toLowerCase();
   const ahkHotkey = ahkModifier + keyMapped;
-  const killHotkey = '^!+' + keyMapped;
+  const killHotkey = '^+' + keyMapped;
 
   const ahkPaths = [
     path.join(__dirname, '..', '..', 'hotkey.ahk'),

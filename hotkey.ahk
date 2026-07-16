@@ -94,7 +94,7 @@ f4:: {
     }
 }
 
-^!+f4:: {
+^+f4:: {
     try {
         ProcessClose("electron.exe")
     }

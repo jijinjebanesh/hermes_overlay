@@ -42,6 +42,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [activeProviderFilter, setActiveProviderFilter] = useState<string | null>(null);
   const [sessions, setSessions] = useState<any[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -62,6 +63,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     if (isOpen) {
       setQuery('');
       setSelectedIndex(0);
+      setActiveProviderFilter(null);
       setTimeout(() => inputRef.current?.focus(), 50);
       // Fetch recent sessions
       api?.listSessions?.().then((s: any[]) => setSessions(s?.slice(0, 8) || []));
@@ -71,6 +73,30 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   // Build items list
   const items = useMemo((): PaletteItem[] => {
     const result: PaletteItem[] = [];
+
+    if (activeProviderFilter) {
+      // ── MODEL SEARCH MODE ──
+      const provider = inventory.find(p => p.slug === activeProviderFilter);
+      if (provider && provider.models?.length) {
+        for (const model of provider.models) {
+          const isActive = model === activeModel && provider.slug === activeProvider;
+          result.push({
+            id: `model-${provider.slug}-${model}`,
+            label: model,
+            section: `Models (${provider.name})`,
+            icon: <Zap />,
+            active: isActive,
+            action: () => {
+              setActiveProvider(provider.slug);
+              setActiveModel(model);
+              api?.setProviderAndModel?.(provider.slug, model);
+              onClose();
+            },
+          });
+        }
+      }
+      return result;
+    }
 
     // ── ACTIONS ──
     result.push({
@@ -117,15 +143,35 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       });
     }
 
-    // ── MODELS ──
+    // ── PROVIDERS ──
     for (const provider of inventory) {
       if (!provider.models?.length) continue;
-      for (const model of provider.models.slice(0, 5)) {
+      const isProviderActive = provider.slug === activeProvider;
+      result.push({
+        id: `provider-${provider.slug}`,
+        label: provider.name,
+        section: 'Providers',
+        icon: <Zap />,
+        meta: `${provider.models.length} models`,
+        active: isProviderActive,
+        action: () => {
+          setActiveProviderFilter(provider.slug);
+          setQuery('');
+          setSelectedIndex(0);
+          inputRef.current?.focus();
+        },
+      });
+    }
+
+    // ── ALL MODELS (For Global Search) ──
+    for (const provider of inventory) {
+      if (!provider.models?.length) continue;
+      for (const model of provider.models) {
         const isActive = model === activeModel && provider.slug === activeProvider;
         result.push({
-          id: `model-${provider.slug}-${model}`,
+          id: `global-model-${provider.slug}-${model}`,
           label: model,
-          section: 'Models',
+          section: 'All Models',
           icon: <Zap />,
           meta: provider.name,
           active: isActive,
@@ -168,11 +214,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     return result;
   }, [sessions, inventory, activeModel, activeProvider, theme,
       onNewSession, onOpenSettings, onSwitchSession, onEnterEchoMode, onClose,
-      setTheme, setActiveModel, setActiveProvider]);
+      setTheme, setActiveModel, setActiveProvider, activeProviderFilter]);
 
   // Filter items by query
   const filteredItems = useMemo(() => {
-    if (!query.trim()) return items;
+    if (!query.trim()) {
+      return items.filter(item => item.section !== 'All Models');
+    }
     const q = query.toLowerCase();
     return items.filter(item =>
       item.label.toLowerCase().includes(q) ||
@@ -222,8 +270,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         e.preventDefault();
         onClose();
         break;
+      case 'Backspace':
+        if (!query && activeProviderFilter) {
+          e.preventDefault();
+          setActiveProviderFilter(null);
+        }
+        break;
     }
-  }, [flatItems, selectedIndex, onClose]);
+  }, [flatItems, selectedIndex, onClose, query, activeProviderFilter]);
 
   // Scroll selected item into view
   useEffect(() => {
@@ -249,11 +303,26 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         {/* Search input */}
         <div className="command-palette-input-wrapper">
           <Search />
+          {activeProviderFilter && (
+            <div style={{
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-primary)',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              marginRight: '8px'
+            }}>
+              {inventory.find(p => p.slug === activeProviderFilter)?.name || activeProviderFilter}
+            </div>
+          )}
           <input
             ref={inputRef}
             className="command-palette-input"
             type="text"
-            placeholder="Search actions, models, sessions..."
+            placeholder={activeProviderFilter ? "Search models..." : "Search actions, models, sessions..."}
             value={query}
             onChange={e => { setQuery(e.target.value); setSelectedIndex(0); }}
             autoComplete="off"
