@@ -40,6 +40,7 @@ export function createWindow() {
     minHeight: 300,
     maxHeight: MAX_HEIGHT,
     frame: false,
+    icon: path.join(__dirname, '../../assets/icon.png'),
     alwaysOnTop: savedBounds?.alwaysOnTop ?? true,
     transparent: true,
     hasShadow: false,
@@ -72,12 +73,9 @@ export function createWindow() {
       mainWindow?.webContents.send('visibility-change', false);
       isVisible = false;
 
-      if (hideTimeout) clearTimeout(hideTimeout);
-      hideTimeout = setTimeout(() => {
-        if (!isVisible && mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.hide();
-        }
-      }, 200);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.hide();
+      }
     }
   });
 
@@ -104,11 +102,9 @@ export function toggleVisibility() {
   if (isVisible) {
     isVisible = false;
     mainWindow.webContents.send('visibility-change', false);
-    hideTimeout = setTimeout(() => {
-      if (!isVisible && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.hide();
-      }
-    }, 10);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.hide();
+    }
   } else {
     mainWindow.show();
     isVisible = true;
