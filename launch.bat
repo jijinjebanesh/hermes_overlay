@@ -7,8 +7,8 @@ if not exist "node_modules" (
     call npm install > nul 2>&1
 )
 
-if not exist "dist-electron\main.js" (
-    call npm run build > nul 2>&1
+if not exist "dist-electron\main\main.cjs" (
+    call npm run build:all > nul 2>&1
 )
 
 SET USER_DATA_DIR=%LOCALAPPDATA%\hermes-overlay-electron

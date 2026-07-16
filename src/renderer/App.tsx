@@ -1,9 +1,12 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
-import { Header } from '../components/Header';
 import { Conversation } from '../components/Conversation';
 import { InputBar } from '../components/InputBar';
-import { SettingsModal } from '../components/SettingsModal';
+import { ContextBar } from '../components/surface/ContextBar';
+import { StatusBar } from '../components/surface/StatusBar';
+import { CommandPalette } from '../components/command/CommandPalette';
+import { SettingsPanel } from '../components/settings/SettingsPanel';
+import { GuideModal } from '../components/GuideModal';
 import { useOverlayStore, generateId } from '../store/overlayStore';
 import type { StreamSegment } from '../store/overlayStore';
 import { EchoMode } from '../components/EchoMode';
@@ -14,11 +17,15 @@ import { ToastContainer } from '../components/ui/Toast';
 import { getElectronAPI } from '../hooks/useElectronAPI';
 
 /**
- * Root component. Renders the three-section layout:
- * Header → Conversation → InputBar.
+ * App — Root component and surface state machine.
  *
- * Wires up IPC listeners for visibility, structured
- * segment streaming, and focus events from main process.
+ * Surface states:
+ *   - query:        Minimal mode, no chrome above input
+ *   - conversation: Context bar + messages + input
+ *   - workspace:    Full chrome with tabs and tool panels
+ *
+ * Preserves all IPC listeners, drag/drop, echo mode, and
+ * keyboard shortcuts from the original architecture.
  */
 
 const api = getElectronAPI();
@@ -42,12 +49,28 @@ export const App: React.FC = () => {
     fontFamily,
     smallWindow,
     cycleToolMode,
+    messages,
+    newSession,
+    hydrateSession,
+    isSettingsOpen,
+    setSettingsOpen,
   } = useOverlayStore();
 
   const [isVisible, setIsVisible] = useState(true);
   const [isEchoMode, setIsEchoMode] = useState(false);
   const [echoTransitioning, setEchoTransitioning] = useState(false);
   const echoStartTimeRef = useRef<number>(0);
+
+  // ── Command Palette state ──
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+
+  // ── Surface state derivation ──
+  // Surface morphs based on content, not explicit mode switching
+  const surfaceState = React.useMemo(() => {
+    if (messages.length === 0) return 'query';
+    if (messages.length > 6) return 'workspace';
+    return 'conversation';
+  }, [messages.length]);
 
   // ── Theme & Font Engine ──
   useEffect(() => {
@@ -56,21 +79,10 @@ export const App: React.FC = () => {
       document.documentElement.style.setProperty('--font-sans', fontFamily);
     }
 
-    // Accent Color — map named color to hex and set CSS custom property
+    // Accent Color — set data attribute for CSS-driven theming
     if (accentColor) {
       document.documentElement.setAttribute('data-accent', accentColor);
-      const ACCENT_HEX: Record<string, string> = {
-        blue:   '#0A84FF',
-        purple: '#BF5AF2',
-        pink:   '#FF375F',
-        red:    '#FF453A',
-        orange: '#FF9F0A',
-        green:  '#30D158',
-      };
-      const hex = ACCENT_HEX[accentColor] || ACCENT_HEX.blue;
-      document.documentElement.style.setProperty('--accent-primary', hex);
     }
-
 
     // Theme logic
     const safeTheme = theme || 'system';
@@ -129,18 +141,14 @@ export const App: React.FC = () => {
         if (visible) {
           focusInput();
 
-          // ── Auto-Context Capture (Screen & App Awareness) ──
-          // When overlay is summoned, silently grab screenshot + clipboard
-          // so they're available as context without manual copy-paste.
+          // ── Auto-Context Capture ──
           const state = useOverlayStore.getState();
           if (state.autoCaptureContext && api.captureContext) {
-            // Small delay so the overlay is fully rendered before hiding for screenshot
             setTimeout(async () => {
               try {
                 const ctx = await api.captureContext!();
                 if (!ctx) return;
 
-                // Auto-attach clipboard text if present
                 if (ctx.clipboardText) {
                   useOverlayStore.getState().addPendingAttachments([{
                     id: generateId(),
@@ -154,7 +162,6 @@ export const App: React.FC = () => {
                   }]);
                 }
 
-                // Auto-attach screenshot if present
                 if (ctx.screenshot) {
                   const fileResult = await api.readDroppedFile(ctx.screenshot.path);
                   if (fileResult) {
@@ -172,7 +179,7 @@ export const App: React.FC = () => {
             }, 50);
           }
         } else {
-          setIsEchoMode(false); // Close Echo mode when hidden
+          setIsEchoMode(false);
         }
       }));
     }
@@ -182,7 +189,7 @@ export const App: React.FC = () => {
       cleanups.push(api.onFocusInput(() => focusInput()));
     }
 
-    // Structured stream segments from hermes parser
+    // Structured stream segments
     if (api.onStreamSegment) {
       cleanups.push(api.onStreamSegment((segment: StreamSegment) => {
         appendSegmentToLast(segment);
@@ -225,10 +232,9 @@ export const App: React.FC = () => {
       }));
     }
 
-    // Push-to-Talk handler — toggles recording on Ctrl+Space
+    // Push-to-Talk
     if (api.onPushToTalkStart) {
       cleanups.push(api.onPushToTalkStart(() => {
-        // Dispatch custom event so EchoMode picks it up
         window.dispatchEvent(new CustomEvent('push-to-talk-toggle'));
       }));
     }
@@ -246,13 +252,12 @@ export const App: React.FC = () => {
       }));
     }
 
-    // Background task clicked in notification — show the result
+    // Background task clicked
     if (api.onBackgroundTaskClicked) {
       cleanups.push(api.onBackgroundTaskClicked((taskId: string) => {
         const state = useOverlayStore.getState();
         const task = state.backgroundTasks.find((t: any) => t.id === taskId);
         if (task && task.status === 'completed') {
-          // Display the task result as an assistant message
           state.addMessage({
             id: generateId(),
             role: 'assistant',
@@ -266,10 +271,29 @@ export const App: React.FC = () => {
     return () => cleanups.forEach(fn => fn());
   }, [addMessage, appendSegmentToLast, focusInput, setStreamState, updateLastMessage]);
 
-  // ── Keyboard Shortcuts (Echo Mode & Tool Mode) ──
+  // ── Keyboard Shortcuts ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // ⌘⇧E / Ctrl+Shift+E for Echo mode
+      // Ctrl+K — Command Palette
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.shiftKey) {
+        e.preventDefault();
+        setIsPaletteOpen(prev => !prev);
+      }
+
+      // Ctrl+, — Settings
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+        e.preventDefault();
+        setSettingsOpen(!isSettingsOpen);
+      }
+
+      // Ctrl+N — New Session
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !e.shiftKey) {
+        e.preventDefault();
+        newSession();
+        focusInput();
+      }
+
+      // Ctrl+Shift+E — Echo Mode
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'e') {
         e.preventDefault();
         if (isEchoMode) {
@@ -280,7 +304,7 @@ export const App: React.FC = () => {
         }
       }
       
-      // Ctrl+T to cycle Tool Mode
+      // Ctrl+T — Cycle Tool Mode
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't' && !e.shiftKey) {
         e.preventDefault();
         cycleToolMode();
@@ -288,7 +312,7 @@ export const App: React.FC = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isEchoMode, cycleToolMode]);
+  }, [isEchoMode, cycleToolMode, isSettingsOpen, newSession, focusInput, setSettingsOpen]);
 
   // Stream duration timer
   useEffect(() => {
@@ -305,7 +329,7 @@ export const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // ── Prevent Electron from navigating on file drop (document-level) ──
+  // ── Prevent Electron from navigating on file drop ──
   useEffect(() => {
     const preventNav = (e: DragEvent) => {
       e.preventDefault();
@@ -319,7 +343,7 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // ── Drag & Drop Handlers (Global) ──
+  // ── Drag & Drop Handlers ──
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -353,11 +377,8 @@ export const App: React.FC = () => {
     if (files.length === 0) return;
 
     const supportedExts = [
-      // Images
       'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico',
-      // Documents
       'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'rtf',
-      // Text / Code
       'txt', 'md', 'csv', 'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'log',
       'js', 'ts', 'tsx', 'jsx', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp',
       'cs', 'swift', 'kt', 'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
@@ -374,10 +395,7 @@ export const App: React.FC = () => {
 
       try {
         const result = await api.readDroppedFile(filePath);
-        return {
-          ...result,
-          id: generateId()
-        };
+        return { ...result, id: generateId() };
       } catch (e) {
         console.error('Failed to read dropped file:', e);
         return null;
@@ -396,8 +414,6 @@ export const App: React.FC = () => {
   const enterEchoMode = useCallback(() => {
     echoStartTimeRef.current = Date.now();
     setEchoTransitioning(true);
-    // Phase 1: chat fades up & blurs out (250ms)
-    // EchoMode container fades in concurrently with orb rising from bottom
     setTimeout(() => {
       setIsEchoMode(true);
     }, 250);
@@ -405,14 +421,11 @@ export const App: React.FC = () => {
 
   const handleEchoExit = useCallback((sessionTranscript?: EchoSessionTurn[]) => {
     setIsEchoMode(false);
-    // Phase 2: Echo fades out, chat restores (300ms blur dissolve)
     setTimeout(() => {
       setEchoTransitioning(false);
       focusInput();
     }, 300);
-    // ...merge transcript (unchanged)...
 
-    // Merge transcript into conversation if there were exchanges
     if (sessionTranscript && sessionTranscript.length > 0) {
       const durationSec = Math.floor((Date.now() - echoStartTimeRef.current) / 1000);
       const mins = Math.floor(durationSec / 60);
@@ -420,7 +433,6 @@ export const App: React.FC = () => {
       const durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
       const exchanges = Math.floor(sessionTranscript.length / 2);
 
-      // Build a readable transcript
       const transcriptLines = sessionTranscript.map(t =>
         `**${t.role === 'user' ? 'You' : 'Hermes'}:** ${t.text}`
       ).join('\n\n');
@@ -434,7 +446,23 @@ export const App: React.FC = () => {
     }
   }, [addMessage, focusInput]);
 
+  // ── Session switching (for Command Palette) ──
+  const handleSwitchSession = useCallback(async (sessionId: string) => {
+    if (!api?.getSession) return;
+    try {
+      const messages: any = await api.getSession(sessionId);
+      if (Array.isArray(messages)) {
+        hydrateSession(sessionId, messages);
+      }
+    } catch (e) {
+      console.error('Failed to load session:', e);
+    }
+  }, [hydrateSession]);
+
+  // Show ContextBar in conversation and workspace states
+  const showContextBar = surfaceState !== 'query';
   const showDragOverlay = isDragging;
+
   const shellClasses = [
     'overlay-shell',
     smallWindow ? 'small-mode' : '',
@@ -447,32 +475,62 @@ export const App: React.FC = () => {
       <ToastContainer>
         <div 
           className={shellClasses}
+          data-surface={surfaceState}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           style={{
-                      ...(echoTransitioning ? { pointerEvents: 'none' as const } : {})
-                    }}
+            ...(echoTransitioning ? { pointerEvents: 'none' as const } : {}),
+          }}
         >
+          {/* Drag overlay */}
           {showDragOverlay && (
-            <div className="global-drag-overlay">
-              <div className="global-drag-content">
-                <div className="global-drag-icon"><FolderOpen size={32} strokeWidth={1.5} /></div>
-                <h2>Drop file to attach</h2>
-                <p>Images, documents, code, and more</p>
+            <div className="drag-overlay">
+              <div className="drag-overlay-content">
+                <FolderOpen size={32} strokeWidth={1.5} />
+                <span>Drop file to attach</span>
               </div>
             </div>
           )}
-          <Header />
-          <Conversation />
-          <InputBar inputRef={inputRef} />
-        </div>
-        
-        {/* Settings Modal Layer */}
-        <SettingsModal />
 
-        {/* Echo Mode Layer */}
+          {/* Context Bar — always present, replaces old Header */}
+          <ContextBar
+            onMoreClick={() => setIsPaletteOpen(true)}
+            onNewSession={() => { newSession(); focusInput(); }}
+            showNewButton={true}
+          />
+
+          {/* Conversation */}
+          <Conversation />
+
+          {/* Input */}
+          <InputBar inputRef={inputRef} />
+
+          {/* Status Bar — conditional */}
+          <StatusBar />
+
+          {/* Command Palette (Ctrl+K) — inside shell for containment */}
+          <CommandPalette
+            isOpen={isPaletteOpen}
+            onClose={() => setIsPaletteOpen(false)}
+            onNewSession={() => { newSession(); focusInput(); }}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onSwitchSession={handleSwitchSession}
+            onEnterEchoMode={enterEchoMode}
+          />
+
+          {/* Settings Panel (Ctrl+,) — inside shell for containment */}
+          <SettingsPanel
+            isOpen={isSettingsOpen}
+            onClose={() => setSettingsOpen(false)}
+          />
+
+          {/* Guide Modal — inside shell for containment */}
+          <GuideModal />
+        </div>
+
+        {/* Echo Mode Layer — fixed fullscreen, outside shell */}
         {isEchoMode && (
           <EchoMode onExit={handleEchoExit} />
         )}

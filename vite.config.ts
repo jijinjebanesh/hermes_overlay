@@ -1,53 +1,28 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import electron from 'vite-plugin-electron'
-import renderer from 'vite-plugin-electron-renderer'
-import { resolve } from 'path'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { fileURLToPath, URL } from 'node:url';
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
-  plugins: [
-    react(),
-    electron([
-      {
-        entry: 'src/main/main.ts',
-        vite: {
-          build: {
-            outDir: 'dist-electron',
-            rollupOptions: {
-              external: ['electron', 'electron-store'],
-            },
-          },
-        },
-      },
-      {
-        entry: 'src/preload/preload.ts',
-        vite: {
-          build: {
-            outDir: 'dist-electron',
-            rollupOptions: {
-              external: ['electron'],
-            },
-          },
-        },
-        onstart(options) {
-          options.reload()
-        },
-      },
-    ]),
-    renderer(),
-  ],
+  plugins: [react()],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
-  root: '.',
+  base: './',
   build: {
     outDir: 'dist',
+    emptyOutDir: true,
     rollupOptions: {
-      input: {
-        main: resolve(__dirname, 'index.html'),
-      },
-    },
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          ui: ['lucide-react', 'framer-motion'],
+          markdown: ['react-markdown']
+        }
+      }
+    }
   },
-})
+});

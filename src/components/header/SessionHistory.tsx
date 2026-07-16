@@ -133,7 +133,7 @@ export const SessionHistory: React.FC = () => {
               >
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
                   <span className="model-item-name" style={{ fontWeight: 500 }}>{s.title}</span>
-                  <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
+                  <span style={{ fontSize: '10px', color: 'var(--text-disabled)', marginTop: '2px' }}>
                     {s.started_at ? new Date(s.started_at).toLocaleString() : ''} · {s.message_count} msg
                   </span>
                   {s.snippet && (

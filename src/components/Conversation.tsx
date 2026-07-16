@@ -68,18 +68,39 @@ export const Conversation: React.FC = () => {
       const isLastAssistantMessage = idx === messages.length - 1 && msg.role === 'assistant';
       const isStreaming = isLastAssistantMessage && streamState.isStreaming && !msg.cancelled;
 
+      // Determine streaming status label
+      const getStreamingLabel = () => {
+        switch (streamState.mode) {
+          case 'thinking': return 'Thinking';
+          case 'tool': return 'Working';
+          case 'terminal': return 'Running';
+          case 'searching': return 'Searching';
+          default: return 'Thinking';
+        }
+      };
+
       return (
         <React.Fragment key={msg.id || idx}>
           {showDateSeparator && (
-            <div className="date-separator">
+            <motion.div 
+              className="date-separator"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.2 }}
+            >
               <span className="date-separator-pill">{dateStr}</span>
-            </div>
+            </motion.div>
           )}
           
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, type: 'spring', bounce: 0 }}
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ 
+              duration: 0.35, 
+              type: 'spring', 
+              bounce: 0.15,
+              delay: 0.02
+            }}
             className="message-row"
           >
             <MessageBubble 
@@ -120,24 +141,30 @@ export const Conversation: React.FC = () => {
               }}
             />
 
-            {/* Streaming cursor and typing indicator */}
+            {/* Streaming indicator */}
             {isStreaming && (
-              <div className="stream-indicator">
-                <div className="typing-indicator">
-                  <span className="typing-dot"></span>
-                  <span className="typing-dot"></span>
-                  <span className="typing-dot"></span>
+              <motion.div 
+                className="stream-indicator"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <div className="stream-indicator-content">
+                  <div className="stream-dots">
+                    <span className="stream-dot"></span>
+                    <span className="stream-dot"></span>
+                    <span className="stream-dot"></span>
+                  </div>
+                  <span className="stream-status">
+                    {getStreamingLabel()}
+                    <span className="stream-divider">·</span>
+                    <span className="stream-time">{streamState.duration}s</span>
+                  </span>
                 </div>
-                <span className="stream-status">
-                  {streamState.mode === 'thinking' ? 'Thinking' :
-                   streamState.mode === 'tool' ? 'Working' :
-                   streamState.mode === 'terminal' ? 'Running' :
-                   streamState.mode === 'searching' ? 'Searching' :
-                   'Thinking'}
-                  {' · '}
-                  {streamState.duration}s
-                </span>
-              </div>
+                {streamState.tokens > 0 && (
+                  <span className="stream-tokens">{streamState.tokens} tokens</span>
+                )}
+              </motion.div>
             )}
           </motion.div>
         </React.Fragment>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquarePlus, X, Settings, TerminalSquare, Zap } from 'lucide-react';
+import { MessageSquarePlus, X, Settings, TerminalSquare, Zap, Keyboard } from 'lucide-react';
 import { useOverlayStore } from '../store/overlayStore';
 import { getElectronAPI } from '../hooks/useElectronAPI';
 import { ModelSelector } from './header/ModelSelector';
@@ -20,15 +20,35 @@ export const Header: React.FC = () => {
   const runningTasks = backgroundTasks.filter((t: any) => t.status === 'running');
   const hasRunning = runningTasks.length > 0;
 
+  // Get tool mode label with icon
+  const getToolModeInfo = () => {
+    switch (toolMode) {
+      case 'all': return { label: 'Full tools', color: 'var(--accent-primary)' };
+      case 'terminal': return { label: 'Terminal', color: 'var(--accent-warning)' };
+      case 'none': return { label: 'Chat only', color: 'var(--text-muted)' };
+      default: return { label: 'Full tools', color: 'var(--accent-primary)' };
+    }
+  };
+  
+  const toolModeInfo = getToolModeInfo();
+
   return (
-    <div className="header">
+    <header className="header">
       {/* LEFT: Status cluster */}
       <div className="header-left">
         <ModelSelector />
 
         <div className="header-status-cluster">
-          <div className="tool-mode-pill" title={`Tool mode: ${toolMode === 'all' ? 'Full tools' : toolMode === 'terminal' ? 'Terminal only' : 'Chat only'}`}>
-            {toolMode === 'all' ? 'Full tools' : toolMode === 'terminal' ? 'Terminal' : 'Chat'}
+          <div 
+            className="tool-mode-pill" 
+            style={{ 
+              color: toolModeInfo.color,
+              borderColor: `color-mix(in srgb, ${toolModeInfo.color} 25%, transparent)`
+            }}
+            title={`Tool mode: ${toolModeInfo.label}`}
+          >
+            <Zap size={9} strokeWidth={2} style={{ opacity: 0.8 }} />
+            {toolModeInfo.label}
           </div>
 
           <div className="connection-dot" title="Hermes backend connected" role="status" aria-label="Backend connected" />
@@ -41,7 +61,7 @@ export const Header: React.FC = () => {
       </div>
 
       {/* RIGHT: Action buttons */}
-      <div className="header-actions">
+      <nav className="header-actions" role="navigation" aria-label="Header actions">
         <SessionHistory />
 
         {hasRunning && (
@@ -54,15 +74,16 @@ export const Header: React.FC = () => {
           </div>
         )}
 
-        <div className="header-divider" />
+        <div className="header-divider" aria-hidden="true" />
 
         <button
           className="header-btn"
           onClick={handleTerminal}
-          title="Open Terminal"
+          title="Open Terminal (⌘T)"
           aria-label="Open Terminal"
+          accessKey="t"
         >
-          <TerminalSquare size={13} />
+          <TerminalSquare size={14} strokeWidth={1.5} />
         </button>
 
         <button
@@ -70,28 +91,31 @@ export const Header: React.FC = () => {
           onClick={handleSettings}
           title="Settings"
           aria-label="Open settings"
+          accessKey=","
         >
-          <Settings size={13} />
+          <Settings size={14} strokeWidth={1.5} />
         </button>
 
         <button
           className="header-btn new-chat-btn"
           onClick={handleNewChat}
-          title="New Chat"
+          title="New Chat (⌘N)"
           aria-label="Start new chat"
+          accessKey="n"
         >
-          <MessageSquarePlus size={13} />
+          <MessageSquarePlus size={14} strokeWidth={1.5} />
         </button>
 
         <button
           className="header-btn header-close-btn"
           onClick={handleClose}
-          title="Close (Escape)"
+          title="Close (Esc)"
           aria-label="Close overlay"
+          accessKey="e"
         >
-          <X size={13} />
+          <X size={14} strokeWidth={1.5} />
         </button>
-      </div>
-    </div>
+      </nav>
+    </header>
   );
 };

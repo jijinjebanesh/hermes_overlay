@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, MouseEvent, WheelEvent } from 'react';
 import type { AttachedFile } from '../store/overlayStore';
 import { File, Code, Image as ImageIcon, FileText, Sheet, X } from 'lucide-react';
 
@@ -40,13 +40,59 @@ const getKind = (ext: string, isImage: boolean): string => {
 export const AttachmentChip: React.FC<AttachmentChipProps> = ({ file, onRemove, variant }) => {
   const isPending = variant === 'pending';
   const [imgError, setImgError] = useState(false);
-  const imgSrc = `local-file://preview?path=${encodeURIComponent(file.path)}`;
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  
+  // Zoom & Pan state
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+
+  const handleWheel = (e: WheelEvent) => {
+    if (!file.isImage) return;
+    e.preventDefault();
+    setScale(s => Math.min(Math.max(0.1, s - e.deltaY * 0.005), 10));
+  };
+
+  const handleMouseDown = (e: MouseEvent) => {
+    if (!file.isImage) return;
+    e.preventDefault();
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (isDragging) {
+      setPosition({ x: e.clientX - dragStartRef.current.x, y: e.clientY - dragStartRef.current.y });
+    }
+  };
+
+  const handleMouseUp = () => setIsDragging(false);
+
+  const resetZoom = () => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+  };
+  
+  const closePreview = () => {
+    setIsPreviewOpen(false);
+    resetZoom();
+  };
+  
+  const imgSrc = (file.content && file.content.startsWith('data:image')) 
+    ? file.content 
+    : `local-file://preview?path=${encodeURIComponent(file.path)}`;
   const meta = file.tooBig ? 'Path only' : formatSize(file.size);
 
   return (
     <div className={`attachment-chip attachment-chip--${variant} ${file.isImage ? 'attachment-chip--image' : 'attachment-chip--file'}`}>
       {file.isImage && !imgError ? (
-        <div className="attachment-chip__preview attachment-chip__preview--image">
+        <div 
+          className="attachment-chip__preview attachment-chip__preview--image" 
+          onClick={() => setIsPreviewOpen(true)}
+          style={{ cursor: 'pointer' }}
+          title="Click to preview"
+        >
           <img
             src={imgSrc}
             alt={file.name}
@@ -55,7 +101,12 @@ export const AttachmentChip: React.FC<AttachmentChipProps> = ({ file, onRemove, 
           />
         </div>
       ) : (
-        <div className="attachment-chip__preview attachment-chip__preview--file">
+        <div 
+          className="attachment-chip__preview attachment-chip__preview--file"
+          onClick={() => { if (file.content) setIsPreviewOpen(true); }}
+          style={{ cursor: file.content ? 'pointer' : 'default' }}
+          title={file.content ? "Click to preview" : undefined}
+        >
           <div className="attachment-chip__icon">
             {getIcon(file.ext, file.isImage)}
           </div>
@@ -64,7 +115,12 @@ export const AttachmentChip: React.FC<AttachmentChipProps> = ({ file, onRemove, 
 
       {/* Image chips: preview only, no text. File chips: full info */}
       {!file.isImage && (
-        <div className="attachment-chip__info">
+        <div 
+          className="attachment-chip__info"
+          onClick={() => { if (file.content) setIsPreviewOpen(true); }}
+          style={{ cursor: file.content ? 'pointer' : 'default' }}
+          title={file.content ? "Click to preview" : undefined}
+        >
           <span className="attachment-chip__name">{file.name}</span>
           <span className="attachment-chip__meta">
             <span>{getKind(file.ext, file.isImage)}</span>
@@ -78,6 +134,60 @@ export const AttachmentChip: React.FC<AttachmentChipProps> = ({ file, onRemove, 
         <button className="attachment-chip__remove" onClick={onRemove} title="Remove attachment">
           <X size={12} strokeWidth={2.5} />
         </button>
+      )}
+
+      {isPreviewOpen && (
+        <div className="image-preview-modal" onClick={closePreview}>
+          <div className="image-preview-modal__backdrop" />
+          <div 
+            className="image-preview-modal__content" 
+            onClick={(e) => e.stopPropagation()}
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            style={!file.isImage ? { 
+              width: '800px', 
+              background: 'var(--surface-bg)', 
+              padding: 'var(--space-3)', 
+              border: '1px solid var(--border-secondary)'
+            } : { cursor: isDragging ? 'grabbing' : 'grab', overflow: 'visible' }}
+          >
+            {file.isImage ? (
+              <img 
+                src={imgSrc} 
+                alt={file.name} 
+                className="image-preview-modal__img"
+                draggable={false}
+                style={{
+                  transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+                  transition: isDragging ? 'none' : 'transform 0.1s ease-out'
+                }}
+              />
+            ) : (
+              <div style={{ width: '100%', maxHeight: '80vh', overflowY: 'auto' }}>
+                <h3 style={{ marginTop: 0, marginBottom: 'var(--space-2)', color: 'var(--text-primary)', fontSize: 'var(--text-lg)' }}>
+                  {file.name}
+                </h3>
+                <pre style={{ 
+                  margin: 0, 
+                  whiteSpace: 'pre-wrap', 
+                  wordBreak: 'break-word', 
+                  color: 'var(--text-primary)', 
+                  fontFamily: 'var(--font-mono)', 
+                  fontSize: 'var(--text-sm)',
+                  lineHeight: '1.5'
+                }}>
+                  {file.content}
+                </pre>
+              </div>
+            )}
+            <button className="image-preview-modal__close" onClick={closePreview}>
+              <X size={24} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

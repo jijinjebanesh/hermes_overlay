@@ -73,8 +73,6 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
           setInput('');
           setIsAutocompleteOpen(false);
           resetTextarea();
-        } else {
-          api?.closeOverlay();
         }
       }
     };
@@ -144,7 +142,56 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     if (e.key === 'Enter') {
       if (e.shiftKey) return;
       e.preventDefault();
-      handleSubmit();
+      if (e.ctrlKey || e.metaKey) {
+        handleBackgroundSend();
+      } else {
+        handleSubmit();
+      }
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedText = e.clipboardData?.getData('text');
+    if (pastedText && pastedText.length > 2000) {
+      e.preventDefault();
+      addPendingAttachments([{
+        name: `paste_${Date.now()}.txt`,
+        path: `clipboard://${generateId()}`,
+        content: pastedText,
+        tooBig: pastedText.length > 100_000,
+        size: pastedText.length,
+        ext: 'txt',
+        isImage: false,
+        id: generateId(),
+      }]);
+      return;
+    }
+
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const base64 = event.target?.result as string;
+            addPendingAttachments([{
+              name: file.name || 'Pasted Image.png',
+              path: `clipboard://${generateId()}`,
+              content: base64,
+              tooBig: false,
+              size: file.size,
+              ext: file.type.split('/')[1] || 'png',
+              isImage: true,
+              id: generateId(),
+            }]);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
     }
   };
 
@@ -556,10 +603,45 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     setInput('');
     clearPendingAttachments();
     resetTextarea();
-    api?.closeOverlay?.(); // dismiss overlay — user goes back to work
   };
 
   const hasContent = input.trim().length > 0 || pendingAttachments.length > 0;
+
+  // ── Context Capture handler ──
+  const handleCaptureContext = async () => {
+    if (!api?.captureContext) return;
+    try {
+      const ctx = await api.captureContext();
+      if (!ctx) return;
+
+      if (ctx.clipboardText) {
+        addPendingAttachments([{
+          id: generateId(),
+          name: 'Clipboard.txt',
+          path: `clipboard://manual_${Date.now()}`,
+          content: ctx.clipboardText,
+          tooBig: ctx.clipboardText.length > 100_000,
+          size: ctx.clipboardText.length,
+          ext: 'txt',
+          isImage: false,
+        }]);
+      }
+
+      if (ctx.screenshot) {
+        const fileResult = await api.readDroppedFile(ctx.screenshot.path);
+        if (fileResult) {
+          addPendingAttachments([{
+            ...fileResult,
+            ext: fileResult.ext || 'png',
+            isImage: true,
+            id: generateId(),
+          }]);
+        }
+      }
+    } catch (e) {
+      console.error('[ManualContext] Capture failed:', e);
+    }
+  };
 
   return (
     <div className="input-bar">
@@ -567,6 +649,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         <div className="drag-tooltip">{rejectTooltip}</div>
       )}
 
+      {/* Left: Attach button */}
       <AttachMenu
         isOpen={showAttachMenu}
         onToggle={() => setShowAttachMenu(!showAttachMenu)}
@@ -576,6 +659,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         onClipboardPaste={handleClipboardPaste}
       />
 
+      {/* Center: Textarea + attachments */}
       <div className="input-content-col">
         <AttachmentBar 
           attachments={pendingAttachments} 
@@ -596,74 +680,64 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
             value={input}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Hermes"
+            onPaste={handlePaste}
+            placeholder="Message Hermes..."
             className="input-textarea"
             rows={1}
+            aria-label="Message input"
+            spellCheck="false"
           />
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Right: Action buttons */}
+      <div className="input-actions-group">
+        {/* Context capture button */}
         <button
-          className="echo-mode-btn"
+          className="input-action-btn"
+          onClick={handleCaptureContext}
+          title="Capture context (screenshot + clipboard)"
+          aria-label="Capture context"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 7V2h5" /><path d="M22 7V2h-5" /><path d="M2 17v5h5" /><path d="M22 17v5h-5" /><rect x="7" y="7" width="10" height="10" rx="1" />
+          </svg>
+        </button>
+
+        {/* Echo/Voice mode button */}
+        <button
+          className="input-action-btn"
           onClick={handleEchoMode}
-          title="Start Echo Mode (Voice Interaction)"
-          aria-label="Start Echo Mode"
-          onMouseEnter={() => setEchoTooltip('Start Echo Mode')}
-          onMouseLeave={() => setEchoTooltip(null)}
+          title="Voice mode (Ctrl+Shift+E)"
+          aria-label="Start voice mode"
         >
           <AudioLines size={16} strokeWidth={2} />
         </button>
 
-        {!streamState.isStreaming && hasContent && (
-          <button
-            className="echo-mode-btn"
-            onClick={handleBackgroundSend}
-            title="Run in Background"
-            aria-label="Run in background"
-          >
-            <Zap size={15} strokeWidth={2} />
-          </button>
-        )}
+        {/* Background send moved to Ctrl+Enter */}
   
+        {/* Stop streaming (conditional) */}
         {streamState.isStreaming && (
           <button
-            className="send-btn streaming"
+            className="input-action-btn stop"
             onClick={handleStop}
             aria-label="Stop streaming"
-            style={{ marginRight: 0 }}
           >
-            <Square size={14} fill="var(--text-secondary)" color="var(--text-secondary)" />
+            <Square size={14} fill="currentColor" />
           </button>
         )}
+
+        {/* Send button */}
         <button
           className={`send-btn ${hasContent ? 'ready' : 'idle'}`}
           onClick={handleSubmit}
           disabled={!hasContent}
+          title="Send (Enter) / Background (Ctrl+Enter)"
           aria-label="Send message"
         >
           <ArrowUp size={16} strokeWidth={2.5} />
         </button>
       </div>
-
-      {echoTooltip && (
-        <div className="echo-tooltip" style={{
-          position: 'absolute',
-          bottom: '70px',
-          right: '60px',
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-primary)',
-          padding: '6px 10px',
-          borderRadius: '6px',
-          fontSize: '12px',
-          color: 'var(--text-primary)',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          pointerEvents: 'none',
-          zIndex: 1000
-        }}>
-          {echoTooltip}
-        </div>
-      )}
     </div>
   );
 };

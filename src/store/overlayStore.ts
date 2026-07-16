@@ -98,6 +98,7 @@ interface OverlayState {
   // Settings State
   isSettingsOpen: boolean;
   settingsSidebarCollapsed: boolean;
+  isGuideOpen: boolean;
   launchAtStartup: boolean;
   globalHotkey: string;
   alwaysOnTop: boolean;
@@ -127,8 +128,9 @@ interface OverlayState {
   backgroundTasks: any[];
 
   // Actions
-  setSettingsOpen: (isOpen: boolean) => void;
+  setSettingsOpen: (open: boolean) => void;
   setSettingsSidebarCollapsed: (collapsed: boolean) => void;
+  setGuideOpen: (open: boolean) => void;
   setLaunchAtStartup: (enable: boolean) => void;
   setGlobalHotkey: (key: string) => void;
   setAlwaysOnTop: (always: boolean) => void;
@@ -217,7 +219,8 @@ export const useOverlayStore = create<OverlayState>()(
 
       // Settings
       isSettingsOpen: false,
-      settingsSidebarCollapsed: false,
+      settingsSidebarCollapsed: true, // Default to collapsed for more content space
+      isGuideOpen: false,
       launchAtStartup: false,
       globalHotkey: 'CommandOrControl+Alt+H',
       alwaysOnTop: true,
@@ -243,8 +246,9 @@ export const useOverlayStore = create<OverlayState>()(
 
       /* ── Actions ── */
 
-      setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+      setSettingsOpen: (open) => set({ isSettingsOpen: open }),
       setSettingsSidebarCollapsed: (collapsed) => set({ settingsSidebarCollapsed: collapsed }),
+      setGuideOpen: (open) => set({ isGuideOpen: open }),
       setLaunchAtStartup: (enable) => {
         set({ launchAtStartup: enable });
         window.electronAPI?.setLaunchAtStartup(enable);

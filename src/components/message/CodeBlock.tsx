@@ -31,7 +31,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language }) => {
     });
   };
 
-  // Minimal 3-colour syntax highlighter
+  // Enhanced syntax highlighter for Claude-like styling
   const highlight = (text: string) => {
     return text.split('\n').map((line, i) => {
       let html = line
@@ -41,8 +41,11 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language }) => {
         .replace(/(\/\/.*$)/gm, '<span class="token comment">$1</span>')
         .replace(/(#.*$)/gm, '<span class="token comment">$1</span>')
         .replace(/(['"`])(.*?)\1/g, '<span class="token string">$1$2$1</span>')
+        .replace(/\b(\d+)\b/g, '<span class="token number">$1</span>')
+        .replace(/\b([A-Z][a-zA-Z0-9_]*)\b/g, '<span class="token class-name">$1</span>')
+        .replace(/\b([a-zA-Z_]\w*)(?=\()/g, '<span class="token function">$1</span>')
         .replace(
-          /\b(import|from|export|const|let|var|function|return|if|else|for|while|class|switch|case|break|default|new|this|typeof|instanceof|async|await|try|catch|throw|finally|yield|void|delete|in|of|def|print|True|False|None)\b/g,
+          /\b(import|from|export|const|let|var|function|return|if|else|for|while|class|switch|case|break|default|new|this|typeof|instanceof|async|await|try|catch|throw|finally|yield|void|delete|in|of|def|print|True|False|None|true|false|null|undefined)\b/g,
           '<span class="token keyword">$1</span>'
         );
 

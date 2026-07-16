@@ -240,13 +240,23 @@ export function registerIpcHandlers() {
   ipcMain.on('set-small-window', (_e, enable: boolean) => {
     const win = getMainWindow();
     if (!win) return;
-    const { workArea } = screen.getPrimaryDisplay();
-    const WIDTH = 420, MAX_HEIGHT = 600;
+    
+    const currentBounds = win.getBounds();
+    const WIDTH = 420, MAX_HEIGHT = 1200;
     const newWidth = enable ? 380 : WIDTH;
     const newHeight = enable ? 300 : MAX_HEIGHT;
-    const x = workArea.x + workArea.width - newWidth - 24;
-    const y = workArea.y + workArea.height - newHeight - 24;
+    
+    // Anchor to the bottom-right of the CURRENT window position, rather than jumping to screen corner
+    const dx = currentBounds.width - newWidth;
+    const dy = currentBounds.height - newHeight;
+    const x = currentBounds.x + dx;
+    const y = currentBounds.y + dy;
+    
+    // On Windows, setting bounds on a non-resizable window can sometimes fail or act weirdly
+    win.setResizable(true);
     win.setBounds({ x, y, width: newWidth, height: newHeight });
+    win.setResizable(false);
+    
     saveOverlayConfig({ bounds: win.getBounds(), smallWindow: enable });
   });
 

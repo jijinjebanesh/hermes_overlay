@@ -38,6 +38,45 @@ export const MarkdownContent: React.FC<MarkdownContentProps> = ({ content }) => 
           {children}
         </a>
       ),
+      li: ({ className, children, ...props }) => {
+        const isTaskListItem = className && className.includes('task-list-item');
+        const childrenArray = React.Children.toArray(children);
+        
+        // Detect custom [/] for in-progress tasks
+        let isCustomInProgress = false;
+        if (!isTaskListItem && childrenArray.length > 0) {
+          const first = childrenArray[0];
+          if (typeof first === 'string' && first.startsWith('[/] ')) {
+            isCustomInProgress = true;
+            childrenArray[0] = first.substring(4);
+          }
+        }
+
+        if (isTaskListItem || isCustomInProgress) {
+          // If it's a standard task list item, remark-gfm adds an <input type="checkbox">
+          // We can replace it or just style the li.
+          const isCompleted = childrenArray.some((child: any) => 
+            child?.props?.type === 'checkbox' && child?.props?.checked
+          );
+          const isPending = !isCompleted && !isCustomInProgress;
+
+          // Remove the default input checkbox to use our custom icons
+          const filteredChildren = childrenArray.filter((child: any) => child?.props?.type !== 'checkbox');
+
+          return (
+            <li className={`task-list-item styled-task ${isCompleted ? 'task-done' : isCustomInProgress ? 'task-progress' : 'task-pending'}`} {...props}>
+              <span className="task-icon">
+                {isCompleted && <span className="task-icon-done">✓</span>}
+                {isCustomInProgress && <span className="task-icon-progress" />}
+                {isPending && <span className="task-icon-pending" />}
+              </span>
+              <span className="task-content">{filteredChildren}</span>
+            </li>
+          );
+        }
+
+        return <li className={className} {...props}>{children}</li>;
+      }
     }}
     >
       {content}

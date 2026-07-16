@@ -11,7 +11,7 @@ Persistent
 overlayDir := "C:\Users\jijin\hermes-overlay"
 overlayTitle := "Hermes ahk_exe electron.exe"
 electronExe := overlayDir "\node_modules\electron\dist\electron.exe"
-scriptPath := overlayDir "\dist-electron\main.js"
+scriptPath := overlayDir "\dist-electron\main\main.cjs"
 
 DetectHiddenWindows(true)
 SetTitleMatchMode(2)

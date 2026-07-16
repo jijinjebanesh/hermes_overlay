@@ -170,7 +170,7 @@ export const MemorySettings: React.FC = () => {
             for vector-based recall of past conversations.
           </span>
         </div>
-        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+        <div style={{ fontSize: '11px', color: 'var(--text-disabled)', marginTop: '4px' }}>
           To configure, run: <code style={{ background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '4px' }}>hermes memory setup</code>
         </div>
       </div>

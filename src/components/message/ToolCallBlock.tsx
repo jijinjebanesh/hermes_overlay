@@ -48,12 +48,41 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ tool }) => {
   const { Icon, verb } = getToolVisual(tool.name);
   const summary = summarizeCommand(tool);
   const status = tool.status || 'pending';
-  const detail = [
-    `Tool: ${tool.name || 'unknown'}`,
-    summary && `Request: ${summary}`,
-    tool.output && `Output:\n${tool.output}`,
-  ].filter(Boolean).join('\n\n');
-  const hasDetail = Boolean(detail);
+  
+  // Custom rendering for 'todo' tool
+  const isTodoTool = tool.name === 'todo' || tool.name === 'manage_tasks';
+  let parsedTodos = null;
+  if (isTodoTool && tool.output) {
+    try {
+      const parsed = JSON.parse(tool.output);
+      if (parsed && Array.isArray(parsed.todos)) {
+        parsedTodos = parsed.todos;
+      }
+    } catch {
+      // Not valid JSON, fallback to raw text
+    }
+  }
+
+  // Determine appropriate language for output code block
+  const getOutputLanguage = (name: string) => {
+    const n = (name || '').toLowerCase();
+    if (n.includes('patch') || n.includes('replace') || n.includes('edit') || n.includes('diff')) return 'diff';
+    if (n.includes('cmd') || n.includes('run') || n.includes('terminal') || n.includes('shell') || n.includes('execute')) return 'bash';
+    if (n.includes('json')) return 'json';
+    return 'text';
+  };
+  const outputLanguage = getOutputLanguage(tool.name);
+
+  // Format request cleanly if it's JSON
+  let formattedRequest = tool.command || '';
+  try {
+    const parsed = JSON.parse(formattedRequest);
+    formattedRequest = JSON.stringify(parsed, null, 2);
+  } catch {
+    // leave as is
+  }
+
+  const hasDetail = Boolean(tool.command || tool.output);
 
   return (
     <div className="tool-call-card">
@@ -83,7 +112,40 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ tool }) => {
             exit={{ height: 0, opacity: 0, y: -4 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
           >
-            <CodeBlock code={detail} language="text" />
+            {isTodoTool && parsedTodos ? (
+              <div className="todo-tool-list" style={{ marginTop: '4px', padding: '8px 12px', background: 'var(--surface-code)', borderRadius: 'var(--radius-tool)' }}>
+                {parsedTodos.map((task: any, idx: number) => {
+                  const isDone = task.status === 'completed' || task.status === 'done';
+                  const isProgress = task.status === 'in_progress';
+                  const isPending = !isDone && !isProgress;
+                  return (
+                    <div key={task.id || idx} className={`styled-task ${isDone ? 'task-done' : isProgress ? 'task-progress' : 'task-pending'}`} style={{ marginBottom: '8px' }}>
+                      <span className="task-icon">
+                        {isDone && <span className="task-icon-done">✓</span>}
+                        {isProgress && <span className="task-icon-progress" />}
+                        {isPending && <span className="task-icon-pending" />}
+                      </span>
+                      <span className="task-content" style={{ fontSize: '13px' }}>{task.content || task.title}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="tool-detail-grid">
+                {formattedRequest && (
+                  <div className="tool-detail-section">
+                    <div className="tool-detail-label">Request Arguments</div>
+                    <CodeBlock code={formattedRequest} language="json" />
+                  </div>
+                )}
+                {tool.output && (
+                  <div className="tool-detail-section">
+                    <div className="tool-detail-label">Output</div>
+                    <CodeBlock code={tool.output} language={outputLanguage} />
+                  </div>
+                )}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

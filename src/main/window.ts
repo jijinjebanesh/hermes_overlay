@@ -12,7 +12,7 @@ let hideTimeout: NodeJS.Timeout | null = null;
 let isQuitting = false;
 
 const WIDTH = 420;
-const MAX_HEIGHT = 600;
+const MAX_HEIGHT = 1200;
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -49,7 +49,7 @@ export function createWindow() {
     resizable: false,
     title: 'Hermes',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, '../preload/preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
@@ -92,7 +92,7 @@ export function createWindow() {
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 }
 
