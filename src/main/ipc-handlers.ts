@@ -372,9 +372,7 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('open-file-dialog', async () => {
-    const win = getMainWindow();
-    if (!win) return null;
-    const result = await dialog.showOpenDialog(win, {
+    const result: any = await dialog.showOpenDialog({
       properties: ['openFile'],
       filters: [
         { name: 'All Supported', extensions: [
@@ -387,7 +385,7 @@ export function registerIpcHandlers() {
         { name: 'All Files', extensions: ['*'] },
       ],
     });
-    if (result.canceled || result.filePaths.length === 0) return null;
+    if (result?.canceled || result?.filePaths?.length === 0) return null;
     const filepath = result.filePaths[0];
     return { path: filepath, name: path.basename(filepath) };
   });

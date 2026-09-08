@@ -11,7 +11,6 @@
  */
 
 import { useOverlayStore } from './overlayStore';
-import { shallow } from 'zustand/shallow';
 import type { Message, StreamState, ToolMode, InventoryProvider, AttachedFile } from './overlayStore';
 
 // ── Session ──
@@ -38,42 +37,33 @@ export const useIsSettingsOpen = () => useOverlayStore((s) => s.isSettingsOpen);
 
 // ── Settings (grouped) ──
 export const useAppearanceSettings = () =>
-  useOverlayStore(
-    (s) => ({
-      theme: s.theme,
-      accentColor: s.accentColor,
-      fontFamily: s.fontFamily,
-      smallWindow: s.smallWindow,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    theme: s.theme,
+    accentColor: s.accentColor,
+    fontFamily: s.fontFamily,
+    smallWindow: s.smallWindow,
+  }));
 
 export const useWindowSettings = () =>
-  useOverlayStore(
-    (s) => ({
-      alwaysOnTop: s.alwaysOnTop,
-      launchAtStartup: s.launchAtStartup,
-      globalHotkey: s.globalHotkey,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    alwaysOnTop: s.alwaysOnTop,
+    launchAtStartup: s.launchAtStartup,
+    globalHotkey: s.globalHotkey,
+  }));
 
 export const useEchoSettings = () =>
-  useOverlayStore(
-    (s) => ({
-      echoClapWakeEnabled: s.echoClapWakeEnabled,
-      echoVoiceModeEnabled: s.echoVoiceModeEnabled,
-      echoInterruptWords: s.echoInterruptWords,
-      echoExitWords: s.echoExitWords,
-      echoClapSensitivity: s.echoClapSensitivity,
-      echoTtsProvider: s.echoTtsProvider,
-      echoTtsVoice: s.echoTtsVoice,
-      echoWakeWordEnabled: s.echoWakeWordEnabled,
-      echoWakeWord: s.echoWakeWord,
-      echoDoubleClapMinimize: s.echoDoubleClapMinimize,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    echoClapWakeEnabled: s.echoClapWakeEnabled,
+    echoVoiceModeEnabled: s.echoVoiceModeEnabled,
+    echoInterruptWords: s.echoInterruptWords,
+    echoExitWords: s.echoExitWords,
+    echoClapSensitivity: s.echoClapSensitivity,
+    echoTtsProvider: s.echoTtsProvider,
+    echoTtsVoice: s.echoTtsVoice,
+    echoWakeWordEnabled: s.echoWakeWordEnabled,
+    echoWakeWord: s.echoWakeWord,
+    echoDoubleClapMinimize: s.echoDoubleClapMinimize,
+  }));
 
 // ── Theme (individual, for high-frequency access) ──
 export const useTheme = () => useOverlayStore((s) => s.theme);
@@ -81,81 +71,63 @@ export const useAccentColor = () => useOverlayStore((s) => s.accentColor);
 
 // ── Actions (stable references, never cause re-renders) ──
 export const useSessionActions = () =>
-  useOverlayStore(
-    (s) => ({
-      addMessage: s.addMessage,
-      updateLastMessage: s.updateLastMessage,
-      appendSegmentToLast: s.appendSegmentToLast,
-      clearSession: s.clearSession,
-      newSession: s.newSession,
-      hydrateSession: s.hydrateSession,
-      undo: s.undo,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    addMessage: s.addMessage,
+    updateLastMessage: s.updateLastMessage,
+    appendSegmentToLast: s.appendSegmentToLast,
+    clearSession: s.clearSession,
+    newSession: s.newSession,
+    hydrateSession: s.hydrateSession,
+    undo: s.undo,
+  }));
 
 export const useStreamActions = () =>
-  useOverlayStore(
-    (s) => ({
-      setStreamState: s.setStreamState,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    setStreamState: s.setStreamState,
+  }));
 
 export const useInputActions = () =>
-  useOverlayStore(
-    (s) => ({
-      cycleToolMode: s.cycleToolMode,
-      setToolMode: s.setToolMode,
-      addToHistory: s.addToHistory,
-      addPendingAttachments: s.addPendingAttachments,
-      removePendingAttachment: s.removePendingAttachment,
-      clearPendingAttachments: s.clearPendingAttachments,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    cycleToolMode: s.cycleToolMode,
+    setToolMode: s.setToolMode,
+    addToHistory: s.addToHistory,
+    addPendingAttachments: s.addPendingAttachments,
+    removePendingAttachment: s.removePendingAttachment,
+    clearPendingAttachments: s.clearPendingAttachments,
+  }));
 
 export const useSettingsActions = () =>
-  useOverlayStore(
-    (s) => ({
-      setSettingsOpen: s.setSettingsOpen,
-      setLaunchAtStartup: s.setLaunchAtStartup,
-      setGlobalHotkey: s.setGlobalHotkey,
-      setAlwaysOnTop: s.setAlwaysOnTop,
-      setSmallWindow: s.setSmallWindow,
-      setTheme: s.setTheme,
-      setAccentColor: s.setAccentColor,
-      setFontFamily: s.setFontFamily,
-      setLocalMode: s.setLocalMode,
-      setActiveModel: s.setActiveModel,
-      setActiveProvider: s.setActiveProvider,
-      setToolMode: s.setToolMode,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    setSettingsOpen: s.setSettingsOpen,
+    setLaunchAtStartup: s.setLaunchAtStartup,
+    setGlobalHotkey: s.setGlobalHotkey,
+    setAlwaysOnTop: s.setAlwaysOnTop,
+    setSmallWindow: s.setSmallWindow,
+    setTheme: s.setTheme,
+    setAccentColor: s.setAccentColor,
+    setFontFamily: s.setFontFamily,
+    setLocalMode: s.setLocalMode,
+    setActiveModel: s.setActiveModel,
+    setActiveProvider: s.setActiveProvider,
+    setToolMode: s.setToolMode,
+  }));
 
 export const useEchoActions = () =>
-  useOverlayStore(
-    (s) => ({
-      setEchoClapWakeEnabled: s.setEchoClapWakeEnabled,
-      setEchoInterruptWords: s.setEchoInterruptWords,
-      setEchoExitWords: s.setEchoExitWords,
-      setEchoVoiceModeEnabled: s.setEchoVoiceModeEnabled,
-      setEchoClapSensitivity: s.setEchoClapSensitivity,
-      setEchoTtsProvider: s.setEchoTtsProvider,
-      setEchoTtsVoice: s.setEchoTtsVoice,
-      setEchoWakeWordEnabled: s.setEchoWakeWordEnabled,
-      setEchoWakeWord: s.setEchoWakeWord,
-      setEchoDoubleClapMinimize: s.setEchoDoubleClapMinimize,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    setEchoClapWakeEnabled: s.setEchoClapWakeEnabled,
+    setEchoInterruptWords: s.setEchoInterruptWords,
+    setEchoExitWords: s.setEchoExitWords,
+    setEchoVoiceModeEnabled: s.setEchoVoiceModeEnabled,
+    setEchoClapSensitivity: s.setEchoClapSensitivity,
+    setEchoTtsProvider: s.setEchoTtsProvider,
+    setEchoTtsVoice: s.setEchoTtsVoice,
+    setEchoWakeWordEnabled: s.setEchoWakeWordEnabled,
+    setEchoWakeWord: s.setEchoWakeWord,
+    setEchoDoubleClapMinimize: s.setEchoDoubleClapMinimize,
+  }));
 
 export const useInventoryActions = () =>
-  useOverlayStore(
-    (s) => ({
-      setInventory: s.setInventory,
-      setInventoryLoading: s.setInventoryLoading,
-    }),
-    shallow
-  );
+  useOverlayStore((s) => ({
+    setInventory: s.setInventory,
+    setInventoryLoading: s.setInventoryLoading,
+  }));

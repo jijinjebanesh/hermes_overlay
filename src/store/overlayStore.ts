@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { SemanticBlock } from '../semantic/types';
 
 /* ═══════════════════════════════════════════════
    TYPES
@@ -45,6 +46,7 @@ export interface Message {
   /** Structured segments from hermes output (tool activity, diffs, thinking, text) */
   segments?: StreamSegment[];
   attachments?: AttachedFile[];
+  blocks?: SemanticBlock[];
 }
 
 export interface StreamState {
@@ -52,6 +54,7 @@ export interface StreamState {
   tokens: number;
   duration: number;
   mode: string;
+  sessionTokens?: number;
 }
 
 /** Live provider from hermes inventory */
@@ -79,6 +82,7 @@ interface OverlayState {
 
   // Stream state
   streamState: StreamState;
+  uiState: Record<string, any>;
 
   // Input & Tools
   toolMode: ToolMode;
@@ -160,6 +164,8 @@ interface OverlayState {
   addMessage: (msg: Message) => void;
   updateLastMessage: (updater: (msg: Message) => Message) => void;
   appendSegmentToLast: (segment: StreamSegment) => void;
+  hydrateBlocks: (messageId: string, blocks: SemanticBlock[]) => void;
+  updateBlockUIState: (blockId: string, patch: Record<string, any>) => void;
   editFromMessage: (messageId: string) => string | null;
   retryFromMessage: (messageId: string) => string | null;
   clearSession: () => void;
@@ -203,7 +209,9 @@ export const useOverlayStore = create<OverlayState>()(
         tokens: 0,
         duration: 0,
         mode: 'none',
+        sessionTokens: 0,
       },
+      uiState: {},
 
       toolMode: 'all' as ToolMode,
       inputHistory: [],
@@ -339,6 +347,21 @@ export const useOverlayStore = create<OverlayState>()(
 
       hydrateSession: (sessionId, messages) =>
         set({ sessionId, messages }),
+
+      hydrateBlocks: (messageId, blocks) =>
+        set((state) => ({
+          messages: state.messages.map((message) =>
+            message.id === messageId ? { ...message, blocks } : message
+          ),
+        })),
+
+      updateBlockUIState: (blockId, patch) =>
+        set((state) => ({
+          uiState: {
+            ...state.uiState,
+            [blockId]: { ...(state.uiState[blockId] || {}), ...patch },
+          },
+        })),
 
       setStreamState: (newState) =>
         set((state) => ({

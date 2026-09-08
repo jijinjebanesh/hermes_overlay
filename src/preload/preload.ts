@@ -32,7 +32,9 @@ export interface InventoryPayload {
 export interface ElectronAPI {
   // Invoke (returns Promise)
   getConfig: () => Promise<Record<string, any>>;
-  getInventory: () => Promise<InventoryPayload>;
+  getInventory: (options?: { refresh?: boolean }) => Promise<InventoryPayload>;
+  applyProviderModel?: (provider: string, model: string) => Promise<{ success?: boolean; provider?: string; model?: string; error?: string } | undefined>;
+  launchHermesAuth?: (provider: string) => Promise<{ success?: boolean; error?: string } | undefined>;
   captureScreenshot: () => Promise<{ path: string; name: string } | null>;
   openFileDialog: () => Promise<{ path: string; name: string } | null>;
   listSessions: () => Promise<any[]>;
@@ -113,7 +115,9 @@ export interface ElectronAPI {
 contextBridge.exposeInMainWorld('electronAPI', {
   // ── Invoke ──
   getConfig: () => ipcRenderer.invoke('get-config'),
-  getInventory: () => ipcRenderer.invoke('get-inventory'),
+  getInventory: (options?: { refresh?: boolean }) => ipcRenderer.invoke('get-inventory', options ?? {}),
+  applyProviderModel: (provider: string, model: string) => ipcRenderer.invoke('apply-provider-model', { provider, model }),
+  launchHermesAuth: (provider: string) => ipcRenderer.invoke('launch-hermes-auth', provider),
   captureScreenshot: () => ipcRenderer.invoke('capture-screenshot'),
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
   listSessions: () => ipcRenderer.invoke('list-sessions'),
