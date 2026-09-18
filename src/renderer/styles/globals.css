@@ -778,7 +778,10 @@ select:focus-visible {
   animation: drag-pulse 1.5s ease-in-out infinite;
 }
 
-/* ── Session history launcher + panel ── */
+/* ═══════════════════════════════════════════════
+   Session History — Sliver Style
+   ═══════════════════════════════════════════════ */
+
 .history-launcher {
   position: absolute;
   left: 18px;
@@ -795,9 +798,7 @@ select:focus-visible {
   box-shadow: var(--shadow-card);
   color: var(--text-primary);
   cursor: pointer;
-  transition: border-color var(--duration-instant) var(--ease-in-out),
-              background var(--duration-instant) var(--ease-in-out),
-              transform var(--duration-instant) var(--ease-in-out);
+  transition: border-color var(--duration-instant), background var(--duration-instant), transform var(--duration-instant);
 }
 
 .history-launcher:hover {
@@ -805,14 +806,8 @@ select:focus-visible {
   border-color: rgba(255, 255, 255, 0.12);
 }
 
-.history-launcher.is-active {
-  background: rgba(255, 255, 255, 0.09);
-}
-
 .history-launcher-glyph {
   display: flex;
-  align-items: center;
-  justify-content: center;
   gap: 3px;
 }
 
@@ -821,7 +816,6 @@ select:focus-visible {
   height: 4px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.8);
-  display: block;
 }
 
 .session-history-layer {
@@ -834,168 +828,118 @@ select:focus-visible {
 .session-history-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.5);
   border: none;
-  opacity: 0;
-  transition: opacity var(--duration-micro) var(--ease-out);
   padding: 0;
-}
-
-.session-history-layer.is-open {
-  pointer-events: auto;
-}
-
-.session-history-layer.is-open .session-history-backdrop {
-  opacity: 1;
+  cursor: default;
 }
 
 .session-history-sidebar {
   position: absolute;
-  left: 18px;
-  top: 18px;
-  bottom: 18px;
-  width: 370px;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 320px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  background: rgba(11, 11, 14, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
-  box-shadow: var(--shadow-modal);
-  backdrop-filter: blur(18px) saturate(1.2);
-  padding: 18px 18px 14px;
-  transform: translateX(-18px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--duration-micro) var(--ease-out), transform var(--duration-micro) var(--ease-out);
-}
-
-.session-history-layer.is-open .session-history-sidebar {
-  opacity: 1;
-  transform: translateX(0);
-  pointer-events: auto;
+  background: rgba(10, 10, 14, 0.95);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(24px);
+  box-shadow: 4px 0 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
 }
 
 .session-history-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.session-history-heading {
-  display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--duration-instant), padding var(--duration-instant);
+  flex-shrink: 0;
 }
 
-.session-history-kicker {
-  display: inline-flex;
+.session-history-header.scrolled {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+  padding: 10px 16px 8px;
+}
+
+.session-history-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.session-history-title-row {
+  display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  line-height: 1;
 }
 
-.session-history-kicker::before {
-  content: '';
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-success);
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.8);
+.session-history-title-icon {
+  color: var(--accent);
 }
 
-.session-history-heading h2 {
+.session-history-sidebar h2 {
   margin: 0;
-  font-size: clamp(2.1rem, 3vw, 2.6rem);
-  line-height: 1.05;
-  letter-spacing: -0.06em;
+  font-size: 1.25rem;
+  font-weight: var(--weight-semibold);
   color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
-.session-history-count {
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+.session-history-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.session-history-icon-button {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: transparent;
-  color: var(--text-secondary);
-  display: inline-flex;
+.session-history-icon-btn {
+  display: flex;
   align-items: center;
   justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
+  transition: background var(--duration-instant), color var(--duration-instant);
 }
 
-.session-history-icon-button:hover {
+.session-history-icon-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
 }
 
-.session-history-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.session-history-icon-btn.close:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--color-error);
 }
 
-.session-history-new {
+.session-history-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.session-history-search-wrapper {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
 }
 
-.session-history-new kbd {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 36px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-family: var(--font-mono);
-}
-
-.session-history-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding: 0 10px 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.session-history-search svg {
+.session-history-search-icon {
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
-.session-history-search input {
+.session-history-search-input {
   flex: 1;
   min-width: 0;
   height: 100%;
@@ -1006,109 +950,111 @@ select:focus-visible {
   outline: none;
 }
 
-.session-history-search input::placeholder {
+.session-history-search-input::placeholder {
   color: var(--text-muted);
 }
 
 .session-history-search-clear {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
+  width: 16px;
+  height: 16px;
   border: none;
+  border-radius: 50%;
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-secondary);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
-.session-history-list {
+.session-history-scroll {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-right: 4px;
+  gap: 4px;
+  padding: 8px 12px;
 }
 
 .session-history-state {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 12px 4px;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--text-muted);
+  text-align: center;
 }
 
-.session-history-state strong {
-  color: var(--text-primary);
-  font-size: var(--text-base);
-}
-
-.session-history-state-error {
-  color: var(--color-error);
-}
-
+.session-history-state svg { opacity: 0.4; }
+.session-history-state strong { color: var(--text-primary); font-size: var(--text-base); }
+.session-history-state span { font-size: var(--text-sm); }
+.session-history-state.error { color: var(--color-error); }
 .session-history-state button {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
   background: transparent;
   color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 6px 8px;
   cursor: pointer;
 }
 
-.session-history-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.session-history-group { display: flex; flex-direction: column; gap: 2px; }
+.session-history-group+.session-history-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .session-history-group-label {
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: 10px;
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
+  padding: 4px 8px;
 }
+
+.session-history-group-list { display: flex; flex-direction: column; gap: 2px; }
 
 .session-history-item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 10px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
-  transition: background var(--duration-instant) var(--ease-in-out),
-              border-color var(--duration-instant) var(--ease-in-out);
+  transition: background var(--duration-instant), border-color var(--duration-instant);
 }
 
-.session-history-item:hover {
+.session-history-item:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.06);
 }
 
 .session-history-item.is-active {
   background: rgba(59, 130, 246, 0.08);
-  border-color: rgba(96, 165, 250, 0.2);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
+.session-history-item:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .session-history-item-icon {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-muted);
-  margin-top: 1px;
+  flex-shrink: 0;
 }
 
-.session-history-item-copy {
+.session-history-item-content {
   display: flex;
   flex: 1;
   min-width: 0;
@@ -1116,8 +1062,7 @@ select:focus-visible {
   gap: 2px;
 }
 
-.session-history-item-copy strong {
-  color: var(--text-primary);
+.session-history-item-content strong {
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   overflow: hidden;
@@ -1125,44 +1070,56 @@ select:focus-visible {
   white-space: nowrap;
 }
 
-.session-history-item-copy span,
-.session-history-item-copy em {
-  color: var(--text-muted);
+.session-history-item-meta { font-size: var(--text-xs); color: var(--text-muted); }
+
+.session-history-item-content em {
   font-size: var(--text-xs);
+  color: var(--text-muted);
   font-style: normal;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.session-history-active-mark {
-  color: var(--accent);
-  font-size: var(--text-xs);
-  padding-top: 2px;
+.session-history-active-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  flex-shrink: 0;
 }
 
 .session-history-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding-top: 10px;
+  padding: 10px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
+  flex-shrink: 0;
 }
 
-.session-history-clear {
+.session-history-footer span { font-size: var(--text-xs); color: var(--text-muted); }
+
+.session-history-clear-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 4px 8px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--text-primary);
-  border-radius: 8px;
-  padding: 5px 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
   cursor: pointer;
+  transition: background var(--duration-instant), color var(--duration-instant);
 }
+
+.session-history-clear-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
+}
+
+.session-history-clear-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ═══════════════════════════════════════════════
    Context Bar — Hover-expandable model pill
