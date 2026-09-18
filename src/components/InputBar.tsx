@@ -808,25 +808,13 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
           <Zap size={16} strokeWidth={2} />
         </button>
 
-        {/* Stop streaming (conditional) */}
-        {isStreaming && (
-          <button
-            className="input-action-btn stop"
-            onClick={handleStop}
-            aria-label="Stop streaming"
-            title="Stop (Escape)"
-          >
-            <Square size={14} fill="currentColor" />
-          </button>
-        )}
-
-        {/* Send button */}
+        {/* Send button (becomes stop when streaming) */}
         <button
           className={`send-btn ${sendBtnState}`}
-          onClick={handleSubmit}
-          disabled={!hasContent || isStreaming}
-          title={isStreaming ? 'Streaming...' : 'Send (Enter)'}
-          aria-label="Send message"
+          onClick={isStreaming ? handleStop : handleSubmit}
+          disabled={!isStreaming && !hasContent}
+          title={isStreaming ? 'Stop (Escape)' : 'Send (Enter)'}
+          aria-label={isStreaming ? 'Stop streaming' : 'Send message'}
         >
           {isStreaming ? (
             <Square size={14} fill="currentColor" />

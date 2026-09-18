@@ -1477,24 +1477,6 @@ select:focus-visible {
   gap: 0;
 }
 
-/* Compact mode for context bar */
-.overlay-shell.small-mode .model-pill {
-  height: 28px;
-}
-
-.overlay-shell.small-mode .model-pill-dot-btn {
-  width: 28px;
-  height: 28px;
-}
-
-.overlay-shell.small-mode .model-pill-name {
-  display: none;
-}
-
-.overlay-shell.small-mode .model-pill-actions {
-  gap: 0;
-}
-
 .overlay-shell.small-mode .context-bar-btn {
   width: 24px;
   height: 24px;
@@ -6372,6 +6354,40 @@ select:focus-visible {
   color: var(--text-primary);
   font-size: 13.5px;
   line-height: 1.45;
+}
+
+.hermes-clarify-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.hermes-clarify-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--duration-instant), border-color var(--duration-instant);
+  text-align: left;
+  font-family: inherit;
+}
+
+.hermes-clarify-choice:hover {
+  background: var(--surface-card-hover);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+.hermes-clarify-choice-icon {
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
 .hermes-clarify-answer {
