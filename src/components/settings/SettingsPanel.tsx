@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Settings, Sun, Palette, Bot, Mic, Brain, Database, 
-  X, RotateCw, Trash2, Keyboard, Check, 
+import {
+  Settings, Sun, Palette, Bot, Mic, Brain, Database,
+  X, RotateCw, Trash2, Keyboard, Check,
   Zap, Monitor, Terminal, MessageSquare
 } from 'lucide-react';
 import { useOverlayStore } from '../../store/overlayStore';
@@ -60,10 +60,8 @@ const FONTS = [
 ];
 
 /**
- * SettingsPanel — VSCode-style sidebar navigation settings.
- * 
- * Left sidebar with icon+label sections, right content area showing
- * the selected section. Professional, clean UX.
+ * SettingsPanel — Top tab navigation with full-width content.
+ * Works equally well in normal and compact modes.
  */
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
   const store = useOverlayStore();
@@ -105,7 +103,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
     }
   }, [isOpen]);
 
-  // Hotkey recording
   const handleHotkeyKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!isRecordingHotkey) return;
     e.preventDefault();
@@ -126,13 +123,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
     }
   }, [isRecordingHotkey, store]);
 
-  // Save memory
   const handleSaveMemory = useCallback(() => {
     api?.saveMemory?.({ memory: memoryContent, user: userContent });
     setMemoryDirty(false);
   }, [memoryContent, userContent]);
 
-  // Clear all sessions
   const handleClearHistory = useCallback(() => {
     if (confirmClear) {
       api?.clearAllSessions?.();
@@ -143,7 +138,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
     }
   }, [confirmClear]);
 
-  // Save interrupt/exit words on blur
   const handleInterruptWordsBlur = useCallback(() => {
     const words = interruptWordsInput.split(',').map(w => w.trim()).filter(Boolean);
     store.setEchoInterruptWords(words);
@@ -156,48 +150,39 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
 
   if (!isOpen) return null;
 
+  const activeDef = SECTIONS.find(s => s.id === activeSection);
+
   return (
     <>
       <div className="settings-overlay" onClick={onClose} />
-      <div className="settings-panel-vscode">
-        {/* Sidebar */}
-        <div className="settings-sidebar">
-          <div className="settings-sidebar-header">
-            <span className="settings-sidebar-title">Settings</span>
-          </div>
-          <nav className="settings-sidebar-nav">
+      <div className="settings-panel">
+        {/* Top Tab Bar */}
+        <div className="settings-tab-bar">
+          <div className="settings-tab-bar-left">
             {SECTIONS.map(section => (
               <button
                 key={section.id}
-                className={`settings-sidebar-item${activeSection === section.id ? ' active' : ''}`}
+                className={`settings-tab${activeSection === section.id ? ' active' : ''}`}
                 onClick={() => setActiveSection(section.id)}
                 title={section.description}
               >
-                <span className="settings-sidebar-item-icon">{section.icon}</span>
-                <span className="settings-sidebar-item-label">{section.label}</span>
+                <span className="settings-tab-icon">{section.icon}</span>
+                <span className="settings-tab-label">{section.label}</span>
               </button>
             ))}
-          </nav>
+          </div>
+          <button className="settings-tab-close" onClick={onClose} title="Close">
+            <X size={16} />
+          </button>
         </div>
 
-        {/* Content Area */}
+        {/* Content */}
         <div className="settings-content">
-          {/* Content Header */}
           <div className="settings-content-header">
-            <div className="settings-content-header-left">
-              <h2 className="settings-content-title">
-                {SECTIONS.find(s => s.id === activeSection)?.label}
-              </h2>
-              <span className="settings-content-subtitle">
-                {SECTIONS.find(s => s.id === activeSection)?.description}
-              </span>
-            </div>
-            <button className="settings-content-close" onClick={onClose} title="Close">
-              <X size={16} />
-            </button>
+            <h2 className="settings-content-title">{activeDef?.label}</h2>
+            <span className="settings-content-subtitle">{activeDef?.description}</span>
           </div>
 
-          {/* Scrollable Content */}
           <div className="settings-content-body">
             {activeSection === 'general' && (
               <GeneralSection
@@ -252,15 +237,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   );
 };
 
-// ─── Section Components ───
+// ─── Reusable Section Components ───
 
 interface SectionProps {
   store: any;
   api?: any;
 }
 
-const SectionCard: React.FC<{ title?: string; children: React.ReactNode; className?: string }> = ({ 
-  title, children, className = '' 
+const SectionCard: React.FC<{ title?: string; children: React.ReactNode; className?: string }> = ({
+  title, children, className = ''
 }) => (
   <div className={`settings-vscode-card ${className}`}>
     {title && <div className="settings-vscode-card-title">{title}</div>}
@@ -268,9 +253,9 @@ const SectionCard: React.FC<{ title?: string; children: React.ReactNode; classNa
   </div>
 );
 
-const SettingRow: React.FC<{ 
-  label: string; 
-  description?: string; 
+const SettingRow: React.FC<{
+  label: string;
+  description?: string;
   children: React.ReactNode;
   vertical?: boolean;
 }> = ({ label, description, children, vertical }) => (
@@ -285,9 +270,9 @@ const SettingRow: React.FC<{
 
 // ─── General Section ───
 
-const GeneralSection: React.FC<any> = ({ 
-  store, api, isRecordingHotkey, setIsRecordingHotkey, 
-  hotkeyDisplay, handleHotkeyKeyDown 
+const GeneralSection: React.FC<any> = ({
+  store, api, isRecordingHotkey, setIsRecordingHotkey,
+  hotkeyDisplay, handleHotkeyKeyDown
 }) => (
   <div className="settings-section-content">
     <SectionCard title="Window">
@@ -361,8 +346,7 @@ const AppearanceSection: React.FC<SectionProps> = ({ store }) => (
               onClick={() => store.setTheme(t)}
             >
               {t === 'system' && <Monitor size={14} />}
-              {t === 'dark' && <Sun size={14} />}
-              {t === 'light' && <Sun size={14} />}
+              {(t === 'dark' || t === 'light') && <Sun size={14} />}
               <span>{t.charAt(0).toUpperCase() + t.slice(1)}</span>
               {store.theme === t && <Check size={12} />}
             </button>
@@ -442,10 +426,10 @@ const AIEngineSection: React.FC<SectionProps> = ({ store }) => (
 
 // ─── Voice Section ───
 
-const VoiceSection: React.FC<any> = ({ 
+const VoiceSection: React.FC<any> = ({
   store, interruptWordsInput, setInterruptWordsInput,
   exitWordsInput, setExitWordsInput,
-  handleInterruptWordsBlur, handleExitWordsBlur 
+  handleInterruptWordsBlur, handleExitWordsBlur
 }) => (
   <div className="settings-section-content">
     <SectionCard title="Speech Detection">
@@ -573,9 +557,9 @@ const VoiceSection: React.FC<any> = ({
 
 // ─── Memory Section ───
 
-const MemorySection: React.FC<any> = ({ 
+const MemorySection: React.FC<any> = ({
   api, memoryContent, setMemoryContent, userContent, setUserContent,
-  memoryDirty, setMemoryDirty, handleSaveMemory 
+  memoryDirty, setMemoryDirty, handleSaveMemory
 }) => (
   <div className="settings-section-content">
     <SectionCard title="Agent Memory (MEMORY.md)" className="memory-card">
@@ -590,9 +574,9 @@ const MemorySection: React.FC<any> = ({
         <div className="memory-toolbar">
           <button
             className="btn btn-sm"
-            onClick={() => api?.readMemory?.().then((d: any) => { 
-              setMemoryContent(d?.memory || ''); 
-              setMemoryDirty(false); 
+            onClick={() => api?.readMemory?.().then((d: any) => {
+              setMemoryContent(d?.memory || '');
+              setMemoryDirty(false);
             })}
             title="Reload from disk"
           >
@@ -628,8 +612,8 @@ const MemorySection: React.FC<any> = ({
 const DataSection: React.FC<any> = ({ api, confirmClear, handleClearHistory }) => (
   <div className="settings-section-content">
     <SectionCard title="Danger Zone">
-      <SettingRow 
-        label="Clear all sessions" 
+      <SettingRow
+        label="Clear all sessions"
         description="Permanently delete all chat history"
       >
         <button

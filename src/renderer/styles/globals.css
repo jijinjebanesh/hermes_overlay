@@ -701,17 +701,17 @@ select:focus-visible {
   max-height: 380px;
 }
 
-.overlay-shell.small-mode .settings-sidebar {
-  width: 120px;
-  min-width: 120px;
+.overlay-shell.small-mode .settings-tab-bar {
+  padding: 0 var(--space-1);
 }
 
-.overlay-shell.small-mode .settings-sidebar-title {
+.overlay-shell.small-mode .settings-tab-label {
   display: none;
 }
 
-.overlay-shell.small-mode .settings-sidebar-item-label {
-  display: none;
+.overlay-shell.small-mode .settings-tab {
+  padding: var(--space-1);
+  justify-content: center;
 }
 
 .overlay-shell.small-mode .settings-content-header {
@@ -6293,15 +6293,13 @@ select:focus-visible {
 .spin{animation:ps-spin 0.8s linear infinite}
 @keyframes ps-spin{to{transform:rotate(360deg)}}
 
-/* ═══════════════════════════════════════════════
-   SETTINGS PANEL — VSCode Style Sidebar
-   ═══════════════════════════════════════════════ */
-
-.settings-panel-vscode {
+/* Settings Panel — Top Tab Bar */
+.settings-panel {
   position: absolute;
   inset: 0;
   z-index: var(--z-modal);
   display: flex;
+  flex-direction: column;
   background: var(--surface-bg-solid);
   backdrop-filter: blur(40px) saturate(1.5);
   animation: fade-in var(--duration-normal) var(--ease-spring) both;
@@ -6309,66 +6307,48 @@ select:focus-visible {
   border-radius: var(--radius-shell);
 }
 
-.settings-sidebar {
-  width: 200px;
-  min-width: 200px;
-  background: var(--settings-sidebar-bg, rgba(10, 10, 12, 0.98));
-  border-right: 1px solid var(--border-secondary);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.settings-sidebar-header {
-  padding: var(--space-2) var(--space-1-5);
-  border-bottom: 1px solid var(--border-secondary);
-}
-
-.settings-sidebar-title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.settings-sidebar-nav {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: var(--space-1);
-  overflow-y: auto;
-}
-
-.settings-sidebar-item {
+.settings-tab-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  text-align: left;
-  background: transparent;
-  border: none;
-  transition: background var(--duration-instant) var(--ease-in-out),
-              color var(--duration-instant) var(--ease-in-out);
+  justify-content: space-between;
+  padding: 0 var(--space-1-5);
+  border-bottom: 1px solid var(--border-secondary);
+  background: var(--settings-sidebar-bg, rgba(10, 10, 12, 0.6));
+  flex-shrink: 0;
 }
 
-.settings-sidebar-item:hover {
-  background: var(--surface-card-hover);
+.settings-tab-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  padding: var(--space-1-5) var(--space-1);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color var(--duration-instant), border-color var(--duration-instant);
+  white-space: nowrap;
+}
+
+.settings-tab:hover {
   color: var(--text-primary);
 }
 
-.settings-sidebar-item.active {
-  background: var(--accent-muted);
+.settings-tab.active {
   color: var(--accent);
-  font-weight: var(--weight-medium);
+  border-bottom-color: var(--accent);
 }
 
-.settings-sidebar-item-icon {
+.settings-tab-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6377,10 +6357,42 @@ select:focus-visible {
   flex-shrink: 0;
 }
 
-.settings-sidebar-item-label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.settings-tab-label {
+  flex-shrink: 0;
+}
+
+.settings-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: var(--space-1);
+}
+
+.settings-tab-close:hover {
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
+}
+
+/* Compact mode for top bar */
+.overlay-shell.small-mode .settings-tab-bar {
+  padding: 0 var(--space-1);
+}
+
+.overlay-shell.small-mode .settings-tab-label {
+  display: none;
+}
+
+.overlay-shell.small-mode .settings-tab {
+  padding: var(--space-1);
+  justify-content: center;
 }
 
 .settings-content {
