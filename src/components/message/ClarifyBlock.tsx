@@ -1,5 +1,5 @@
-import React from 'react';
-import { HelpCircle, ArrowRight, Check, CornerDownRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { HelpCircle, ArrowRight, CornerDownRight, Send } from 'lucide-react';
 
 interface ClarifyBlockProps {
   question: string;
@@ -9,9 +9,24 @@ interface ClarifyBlockProps {
   onAnswer?: (answer: string | string[]) => void;
 }
 
-export const ClarifyBlock: React.FC<ClarifyBlockProps> = ({ question, answer, choices, multiSelect, onAnswer }) => {
+export const ClarifyBlock: React.FC<ClarifyBlockProps> = ({ question, answer, choices, onAnswer }) => {
+  const [textAnswer, setTextAnswer] = useState('');
   const hasChoices = choices && choices.length > 0;
   const hasAnswer = !!answer;
+
+  const handleSubmitText = () => {
+    if (textAnswer.trim() && onAnswer) {
+      onAnswer(textAnswer.trim());
+      setTextAnswer('');
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmitText();
+    }
+  };
 
   return (
     <div className="hermes-clarify-card">
@@ -36,6 +51,28 @@ export const ClarifyBlock: React.FC<ClarifyBlockProps> = ({ question, answer, ch
                 <span>{choice}</span>
               </button>
             ))}
+          </div>
+        )}
+
+        {!hasChoices && !hasAnswer && (
+          <div className="hermes-clarify-input-row">
+            <input
+              type="text"
+              className="hermes-clarify-input"
+              placeholder="Type your answer..."
+              value={textAnswer}
+              onChange={e => setTextAnswer(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+            />
+            <button
+              className="hermes-clarify-send"
+              onClick={handleSubmitText}
+              disabled={!textAnswer.trim()}
+              title="Send answer"
+            >
+              <Send size={14} />
+            </button>
           </div>
         )}
 

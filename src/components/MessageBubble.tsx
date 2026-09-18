@@ -126,7 +126,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
             <ClarifyBlock
               key={`clarify-${idx}`}
               question={seg.question || ''}
+              choices={seg.choices}
+              multiSelect={seg.multiSelect}
               answer={seg.answer}
+              onAnswer={(answer) => {
+                // Send answer back to Hermes CLI
+                if (api?.sendInput && typeof answer === 'string') {
+                  api.sendInput(answer + '\n');
+                }
+              }}
             />
           );
           break;

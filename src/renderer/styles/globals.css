@@ -6390,6 +6390,58 @@ select:focus-visible {
   flex-shrink: 0;
 }
 
+.hermes-clarify-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.hermes-clarify-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--duration-instant);
+}
+
+.hermes-clarify-input:focus {
+  border-color: var(--accent-border);
+}
+
+.hermes-clarify-input::placeholder {
+  color: var(--text-muted);
+}
+
+.hermes-clarify-send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--duration-instant);
+}
+
+.hermes-clarify-send:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.hermes-clarify-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .hermes-clarify-answer {
   display: flex;
   align-items: center;
