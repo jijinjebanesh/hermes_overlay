@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, RotateCw, Trash2, Keyboard, HelpCircle } from 'lucide-react';
+import { 
+  Settings, Sun, Palette, Bot, Mic, Brain, Database, 
+  X, RotateCw, Trash2, Keyboard, Check, 
+  Zap, Monitor, Terminal, MessageSquare
+} from 'lucide-react';
 import { useOverlayStore } from '../../store/overlayStore';
 import { ProviderSettings } from './ProviderSettings';
 
@@ -8,15 +12,33 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
+type SettingsSection = 'general' | 'appearance' | 'ai-engine' | 'voice' | 'memory' | 'data';
+
+interface SectionDef {
+  id: SettingsSection;
+  label: string;
+  icon: React.ReactNode;
+  description: string;
+}
+
+const SECTIONS: SectionDef[] = [
+  { id: 'general', label: 'General', icon: <Settings size={16} />, description: 'Startup, hotkeys, window behavior' },
+  { id: 'appearance', label: 'Appearance', icon: <Palette size={16} />, description: 'Theme, accent color, font' },
+  { id: 'ai-engine', label: 'AI Engine', icon: <Bot size={16} />, description: 'Provider, model, tool mode' },
+  { id: 'voice', label: 'Voice', icon: <Mic size={16} />, description: 'TTS, wake word, clap detection' },
+  { id: 'memory', label: 'Memory', icon: <Brain size={16} />, description: 'Agent memory, user profile' },
+  { id: 'data', label: 'Data', icon: <Database size={16} />, description: 'Clear history, reset' },
+];
+
 const ACCENT_COLORS = [
-  { id: 'blue', color: '#3B82F6' },
-  { id: 'purple', color: '#A855F7' },
-  { id: 'pink', color: '#EC4899' },
-  { id: 'red', color: '#EF4444' },
-  { id: 'orange', color: '#F97316' },
-  { id: 'green', color: '#22C55E' },
-  { id: 'teal', color: '#14B8A6' },
-  { id: 'indigo', color: '#6366F1' },
+  { id: 'blue', color: '#3B82F6', label: 'Blue' },
+  { id: 'purple', color: '#A855F7', label: 'Purple' },
+  { id: 'pink', color: '#EC4899', label: 'Pink' },
+  { id: 'red', color: '#EF4444', label: 'Red' },
+  { id: 'orange', color: '#F97316', label: 'Orange' },
+  { id: 'green', color: '#22C55E', label: 'Green' },
+  { id: 'teal', color: '#14B8A6', label: 'Teal' },
+  { id: 'indigo', color: '#6366F1', label: 'Indigo' },
 ];
 
 const EDGE_TTS_VOICES = [
@@ -30,17 +52,24 @@ const EDGE_TTS_VOICES = [
   { id: 'en-IN-NeerjaNeural', label: 'Neerja' },
 ];
 
+const FONTS = [
+  { value: 'system-ui', label: 'System Default' },
+  { value: 'Inter', label: 'Inter' },
+  { value: 'Roboto', label: 'Roboto' },
+  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
+];
+
 /**
- * SettingsPanel — Inline settings panel (not modal).
+ * SettingsPanel — VSCode-style sidebar navigation settings.
  * 
- * All configuration in a single scrollable panel.
- * No sidebar, no tabs. Replaces SettingsModal + 6 tab components.
- * 
- * Sections: Appearance, Behavior, Voice, AI Engine, Memory
+ * Left sidebar with icon+label sections, right content area showing
+ * the selected section. Professional, clean UX.
  */
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
   const store = useOverlayStore();
   const api = (window as any).electronAPI;
+
+  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
 
   // Hotkey recording
   const [isRecordingHotkey, setIsRecordingHotkey] = useState(false);
@@ -130,449 +159,487 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   return (
     <>
       <div className="settings-overlay" onClick={onClose} />
-      <div className="settings-panel">
-        {/* Header */}
-        <div className="settings-panel-header">
-          <h2 className="settings-panel-title">Settings</h2>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button 
-              className="settings-panel-close" 
-              onClick={() => { onClose(); store.setGuideOpen(true); }}
-              title="Open Guide"
-            >
-              <HelpCircle size={16} />
-            </button>
-            <button className="settings-panel-close" onClick={onClose} title="Close">
-              <X />
-            </button>
+      <div className="settings-panel-vscode">
+        {/* Sidebar */}
+        <div className="settings-sidebar">
+          <div className="settings-sidebar-header">
+            <span className="settings-sidebar-title">Settings</span>
           </div>
+          <nav className="settings-sidebar-nav">
+            {SECTIONS.map(section => (
+              <button
+                key={section.id}
+                className={`settings-sidebar-item${activeSection === section.id ? ' active' : ''}`}
+                onClick={() => setActiveSection(section.id)}
+                title={section.description}
+              >
+                <span className="settings-sidebar-item-icon">{section.icon}</span>
+                <span className="settings-sidebar-item-label">{section.label}</span>
+              </button>
+            ))}
+          </nav>
         </div>
 
-        {/* Scrollable body */}
-        <div className="settings-panel-body">
-
-          {/* ── APPEARANCE ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">Appearance</div>
-            <div className="settings-card">
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Theme</div>
-                </div>
-                <div className="settings-row-value">
-                  <select
-                    className="select"
-                    value={store.theme}
-                    onChange={e => store.setTheme(e.target.value as any)}
-                  >
-                    <option value="system">System</option>
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                  </select>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Accent color</div>
-                </div>
-                <div className="settings-row-value">
-                  <div className="color-swatches">
-                    {ACCENT_COLORS.map(c => (
-                      <button
-                        key={c.id}
-                        className={`color-swatch${store.accentColor === c.id ? ' active' : ''}`}
-                        style={{ background: c.color }}
-                        onClick={() => store.setAccentColor(c.id)}
-                        title={c.id}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Font</div>
-                </div>
-                <div className="settings-row-value">
-                  <select
-                    className="select"
-                    value={store.fontFamily}
-                    onChange={e => store.setFontFamily(e.target.value)}
-                  >
-                    <option value="system-ui">System</option>
-                    <option value="Inter">Inter</option>
-                    <option value="Roboto">Roboto</option>
-                    <option value="JetBrains Mono">JetBrains Mono</option>
-                  </select>
-                </div>
-              </div>
+        {/* Content Area */}
+        <div className="settings-content">
+          {/* Content Header */}
+          <div className="settings-content-header">
+            <div className="settings-content-header-left">
+              <h2 className="settings-content-title">
+                {SECTIONS.find(s => s.id === activeSection)?.label}
+              </h2>
+              <span className="settings-content-subtitle">
+                {SECTIONS.find(s => s.id === activeSection)?.description}
+              </span>
             </div>
+            <button className="settings-content-close" onClick={onClose} title="Close">
+              <X size={16} />
+            </button>
           </div>
 
-          {/* ── BEHAVIOR ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">Behavior</div>
-            <div className="settings-card">
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Always on top</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`toggle${store.alwaysOnTop ? ' active' : ''}`}
-                    onClick={() => store.setAlwaysOnTop(!store.alwaysOnTop)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Compact mode</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`toggle${store.smallWindow ? ' active' : ''}`}
-                    onClick={() => store.setSmallWindow(!store.smallWindow)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Launch at startup</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`toggle${store.launchAtStartup ? ' active' : ''}`}
-                    onClick={() => store.setLaunchAtStartup(!store.launchAtStartup)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Auto-capture context</div>
-                  <div className="settings-row-description">Capture screen context when summoned</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`toggle${store.autoCaptureContext ? ' active' : ''}`}
-                    onClick={() => store.setAutoCaptureContext(!store.autoCaptureContext)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                </div>
-              </div>
-            </div>
+          {/* Scrollable Content */}
+          <div className="settings-content-body">
+            {activeSection === 'general' && (
+              <GeneralSection
+                store={store}
+                api={api}
+                isRecordingHotkey={isRecordingHotkey}
+                setIsRecordingHotkey={setIsRecordingHotkey}
+                hotkeyDisplay={hotkeyDisplay}
+                handleHotkeyKeyDown={handleHotkeyKeyDown}
+              />
+            )}
+            {activeSection === 'appearance' && (
+              <AppearanceSection store={store} />
+            )}
+            {activeSection === 'ai-engine' && (
+              <AIEngineSection store={store} />
+            )}
+            {activeSection === 'voice' && (
+              <VoiceSection
+                store={store}
+                interruptWordsInput={interruptWordsInput}
+                setInterruptWordsInput={setInterruptWordsInput}
+                exitWordsInput={exitWordsInput}
+                setExitWordsInput={setExitWordsInput}
+                handleInterruptWordsBlur={handleInterruptWordsBlur}
+                handleExitWordsBlur={handleExitWordsBlur}
+              />
+            )}
+            {activeSection === 'memory' && (
+              <MemorySection
+                api={api}
+                memoryContent={memoryContent}
+                setMemoryContent={setMemoryContent}
+                userContent={userContent}
+                setUserContent={setUserContent}
+                memoryDirty={memoryDirty}
+                setMemoryDirty={setMemoryDirty}
+                handleSaveMemory={handleSaveMemory}
+              />
+            )}
+            {activeSection === 'data' && (
+              <DataSection
+                api={api}
+                confirmClear={confirmClear}
+                handleClearHistory={handleClearHistory}
+              />
+            )}
           </div>
-
-          {/* ── HOTKEY ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">Hotkey</div>
-            <div className="settings-card">
-              <div className="settings-row" onKeyDown={handleHotkeyKeyDown}>
-                <div>
-                  <div className="settings-row-label">Trigger hotkey</div>
-                  <div className="settings-row-description">Global keyboard shortcut</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`hotkey-recorder${isRecordingHotkey ? ' recording' : ''}`}
-                    onClick={() => setIsRecordingHotkey(!isRecordingHotkey)}
-                    tabIndex={0}
-                  >
-                    <Keyboard style={{ width: 12, height: 12 }} />
-                    {isRecordingHotkey ? 'Press keys...' : hotkeyDisplay}
-                  </button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Reset window position</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className="btn btn-sm"
-                    onClick={() => api?.resetBounds?.()}
-                  >
-                    <RotateCw style={{ width: 12, height: 12 }} />
-                    Reset
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ── AI ENGINE ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">AI Engine</div>
-            <div className="settings-card">
-              <ProviderSettings />
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Default tool mode</div>
-                </div>
-                <div className="settings-row-value">
-                  <div className="segmented-control">
-                    {(['all', 'terminal', 'none'] as const).map(mode => (
-                      <button
-                        key={mode}
-                        className={`segmented-control-item${store.toolMode === mode ? ' active' : ''}`}
-                        onClick={() => store.setToolMode(mode)}
-                      >
-                        {mode === 'all' ? 'All Tools' : mode === 'terminal' ? 'Terminal' : 'Chat'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Local mode</div>
-                  <div className="settings-row-description">Use local models only</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`toggle${store.localMode ? ' active' : ''}`}
-                    onClick={() => store.setLocalMode(!store.localMode)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ── VOICE ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">Voice</div>
-            <div className="settings-card">
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Double-clap to wake</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`toggle${store.echoClapWakeEnabled ? ' active' : ''}`}
-                    onClick={() => store.setEchoClapWakeEnabled(!store.echoClapWakeEnabled)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Wake word</div>
-                </div>
-                <div className="settings-row-value" style={{ gap: 'var(--space-0-5)' }}>
-                  <button
-                    className={`toggle${store.echoWakeWordEnabled ? ' active' : ''}`}
-                    onClick={() => store.setEchoWakeWordEnabled(!store.echoWakeWordEnabled)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                  {store.echoWakeWordEnabled && (
-                    <input
-                      className="setting-input"
-                      style={{ width: 100 }}
-                      value={store.echoWakeWord}
-                      onChange={e => store.setEchoWakeWord(e.target.value)}
-                      placeholder="hey hermes"
-                    />
-                  )}
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Double-clap to minimize</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`toggle${store.echoDoubleClapMinimize ? ' active' : ''}`}
-                    onClick={() => store.setEchoDoubleClapMinimize(!store.echoDoubleClapMinimize)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Clap sensitivity</div>
-                </div>
-                <div className="settings-row-value" style={{ minWidth: 120 }}>
-                  <div className="slider-wrapper">
-                    <input
-                      type="range"
-                      className="slider"
-                      min="0.1"
-                      max="1"
-                      step="0.05"
-                      value={store.echoClapSensitivity}
-                      onChange={e => store.setEchoClapSensitivity(parseFloat(e.target.value))}
-                    />
-                    <span className="slider-value">{store.echoClapSensitivity.toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Voice always-on</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className={`toggle${store.echoVoiceModeEnabled ? ' active' : ''}`}
-                    onClick={() => store.setEchoVoiceModeEnabled(!store.echoVoiceModeEnabled)}
-                  >
-                    <span className="toggle-knob" />
-                  </button>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">TTS provider</div>
-                </div>
-                <div className="settings-row-value">
-                  <select
-                    className="select"
-                    value={store.echoTtsProvider}
-                    onChange={e => store.setEchoTtsProvider(e.target.value as any)}
-                  >
-                    <option value="edge-tts">Edge TTS</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="elevenlabs">ElevenLabs</option>
-                    <option value="qwen3">Qwen3</option>
-                  </select>
-                </div>
-              </div>
-              {store.echoTtsProvider === 'edge-tts' ? (
-                <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-0-5)' }}>
-                  <div className="settings-row-label">TTS voice</div>
-                  <div className="voice-picker">
-                    {EDGE_TTS_VOICES.map(v => (
-                      <button
-                        key={v.id}
-                        className={`voice-option${store.echoTtsVoice === v.id ? ' active' : ''}`}
-                        onClick={() => store.setEchoTtsVoice(v.id)}
-                      >
-                        {v.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="settings-row">
-                  <div>
-                    <div className="settings-row-label">TTS voice ID</div>
-                  </div>
-                  <div className="settings-row-value">
-                    <input
-                      className="setting-input"
-                      style={{ width: 140 }}
-                      value={store.echoTtsVoice}
-                      onChange={e => store.setEchoTtsVoice(e.target.value)}
-                      placeholder="Voice ID"
-                    />
-                  </div>
-                </div>
-              )}
-              <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-0-5)' }}>
-                <div className="settings-row-label">Interrupt words</div>
-                <input
-                  className="setting-input"
-                  value={interruptWordsInput}
-                  onChange={e => setInterruptWordsInput(e.target.value)}
-                  onBlur={handleInterruptWordsBlur}
-                  placeholder="stop, wait, shut up"
-                />
-              </div>
-              <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-0-5)' }}>
-                <div className="settings-row-label">Exit words</div>
-                <input
-                  className="setting-input"
-                  value={exitWordsInput}
-                  onChange={e => setExitWordsInput(e.target.value)}
-                  onBlur={handleExitWordsBlur}
-                  placeholder="goodbye, close, exit"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* ── MEMORY ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">Memory</div>
-            <div className="settings-card" style={{ padding: 'var(--space-1-5)' }}>
-              <div className="memory-section">
-                <div className="memory-header">
-                  <span className="memory-label">Agent Memory (MEMORY.md)</span>
-                  <div className="memory-actions">
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => api?.readMemory?.().then((d: any) => { setMemoryContent(d?.memory || ''); setMemoryDirty(false); })}
-                    >
-                      <RotateCw style={{ width: 12, height: 12 }} />
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  className="settings-textarea"
-                  value={memoryContent}
-                  onChange={e => { setMemoryContent(e.target.value); setMemoryDirty(true); }}
-                  placeholder="Agent persistent memory..."
-                  rows={4}
-                />
-              </div>
-              <div className="memory-section">
-                <div className="memory-header">
-                  <span className="memory-label">User Profile (USER.md)</span>
-                </div>
-                <textarea
-                  className="settings-textarea"
-                  value={userContent}
-                  onChange={e => { setUserContent(e.target.value); setMemoryDirty(true); }}
-                  placeholder="User profile info..."
-                  rows={3}
-                />
-              </div>
-              {memoryDirty && (
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={handleSaveMemory}
-                  style={{ marginTop: 'var(--space-0-5)' }}
-                >
-                  Save Memory
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* ── DANGER ZONE ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">Data</div>
-            <div className="settings-card">
-              <div className="settings-row">
-                <div>
-                  <div className="settings-row-label">Clear all sessions</div>
-                  <div className="settings-row-description">Permanently delete all chat history</div>
-                </div>
-                <div className="settings-row-value">
-                  <button
-                    className="settings-destructive-btn"
-                    onClick={handleClearHistory}
-                  >
-                    <Trash2 style={{ width: 12, height: 12, display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
-                    {confirmClear ? 'Confirm delete?' : 'Clear history'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
         </div>
       </div>
     </>
   );
 };
+
+// ─── Section Components ───
+
+interface SectionProps {
+  store: any;
+  api?: any;
+}
+
+const SectionCard: React.FC<{ title?: string; children: React.ReactNode; className?: string }> = ({ 
+  title, children, className = '' 
+}) => (
+  <div className={`settings-vscode-card ${className}`}>
+    {title && <div className="settings-vscode-card-title">{title}</div>}
+    {children}
+  </div>
+);
+
+const SettingRow: React.FC<{ 
+  label: string; 
+  description?: string; 
+  children: React.ReactNode;
+  vertical?: boolean;
+}> = ({ label, description, children, vertical }) => (
+  <div className={`settings-vscode-row${vertical ? ' vertical' : ''}`}>
+    <div className="settings-vscode-row-label">
+      <span>{label}</span>
+      {description && <span className="settings-vscode-row-desc">{description}</span>}
+    </div>
+    <div className="settings-vscode-row-control">{children}</div>
+  </div>
+);
+
+// ─── General Section ───
+
+const GeneralSection: React.FC<any> = ({ 
+  store, api, isRecordingHotkey, setIsRecordingHotkey, 
+  hotkeyDisplay, handleHotkeyKeyDown 
+}) => (
+  <div className="settings-section-content">
+    <SectionCard title="Window">
+      <SettingRow label="Always on top" description="Keep window above others">
+        <button
+          className={`toggle${store.alwaysOnTop ? ' active' : ''}`}
+          onClick={() => store.setAlwaysOnTop(!store.alwaysOnTop)}
+        >
+          <span className="toggle-knob" />
+        </button>
+      </SettingRow>
+      <SettingRow label="Compact mode" description="Smaller window size">
+        <button
+          className={`toggle${store.smallWindow ? ' active' : ''}`}
+          onClick={() => store.setSmallWindow(!store.smallWindow)}
+        >
+          <span className="toggle-knob" />
+        </button>
+      </SettingRow>
+      <SettingRow label="Launch at startup" description="Start with system">
+        <button
+          className={`toggle${store.launchAtStartup ? ' active' : ''}`}
+          onClick={() => store.setLaunchAtStartup(!store.launchAtStartup)}
+        >
+          <span className="toggle-knob" />
+        </button>
+      </SettingRow>
+      <SettingRow label="Auto-capture context" description="Capture screen when summoned">
+        <button
+          className={`toggle${store.autoCaptureContext ? ' active' : ''}`}
+          onClick={() => store.setAutoCaptureContext(!store.autoCaptureContext)}
+        >
+          <span className="toggle-knob" />
+        </button>
+      </SettingRow>
+    </SectionCard>
+
+    <SectionCard title="Hotkey">
+      <SettingRow label="Trigger hotkey" description="Global keyboard shortcut to summon">
+        <button
+          className={`hotkey-recorder${isRecordingHotkey ? ' recording' : ''}`}
+          onClick={() => setIsRecordingHotkey(!isRecordingHotkey)}
+          onKeyDown={handleHotkeyKeyDown}
+          tabIndex={0}
+        >
+          <Keyboard style={{ width: 12, height: 12 }} />
+          {isRecordingHotkey ? 'Press keys...' : hotkeyDisplay}
+        </button>
+      </SettingRow>
+      <SettingRow label="Reset window position" description="Restore default bounds">
+        <button className="btn btn-sm" onClick={() => api?.resetBounds?.()}>
+          <RotateCw style={{ width: 12, height: 12 }} />
+          Reset
+        </button>
+      </SettingRow>
+    </SectionCard>
+  </div>
+);
+
+// ─── Appearance Section ───
+
+const AppearanceSection: React.FC<SectionProps> = ({ store }) => (
+  <div className="settings-section-content">
+    <SectionCard title="Theme">
+      <SettingRow label="Color theme">
+        <div className="theme-picker">
+          {(['system', 'dark', 'light'] as const).map(t => (
+            <button
+              key={t}
+              className={`theme-option${store.theme === t ? ' active' : ''}`}
+              onClick={() => store.setTheme(t)}
+            >
+              {t === 'system' && <Monitor size={14} />}
+              {t === 'dark' && <Sun size={14} />}
+              {t === 'light' && <Sun size={14} />}
+              <span>{t.charAt(0).toUpperCase() + t.slice(1)}</span>
+              {store.theme === t && <Check size={12} />}
+            </button>
+          ))}
+        </div>
+      </SettingRow>
+    </SectionCard>
+
+    <SectionCard title="Accent Color">
+      <SettingRow label="Choose accent">
+        <div className="color-swatches">
+          {ACCENT_COLORS.map(c => (
+            <button
+              key={c.id}
+              className={`color-swatch${store.accentColor === c.id ? ' active' : ''}`}
+              style={{ background: c.color }}
+              onClick={() => store.setAccentColor(c.id)}
+              title={c.label}
+            />
+          ))}
+        </div>
+      </SettingRow>
+    </SectionCard>
+
+    <SectionCard title="Typography">
+      <SettingRow label="Font family">
+        <select
+          className="select"
+          value={store.fontFamily}
+          onChange={e => store.setFontFamily(e.target.value)}
+        >
+          {FONTS.map(f => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+      </SettingRow>
+    </SectionCard>
+  </div>
+);
+
+// ─── AI Engine Section ───
+
+const AIEngineSection: React.FC<SectionProps> = ({ store }) => (
+  <div className="settings-section-content">
+    <SectionCard title="Provider & Model" className="no-padding">
+      <ProviderSettings />
+    </SectionCard>
+
+    <SectionCard title="Tool Mode">
+      <SettingRow label="Default tool mode" description="Which tools the AI can use">
+        <div className="segmented-control">
+          {(['all', 'terminal', 'none'] as const).map(mode => (
+            <button
+              key={mode}
+              className={`segmented-control-item${store.toolMode === mode ? ' active' : ''}`}
+              onClick={() => store.setToolMode(mode)}
+            >
+              {mode === 'all' && <Zap size={12} />}
+              {mode === 'terminal' && <Terminal size={12} />}
+              {mode === 'none' && <MessageSquare size={12} />}
+              {mode === 'all' ? 'All Tools' : mode === 'terminal' ? 'Terminal' : 'Chat'}
+            </button>
+          ))}
+        </div>
+      </SettingRow>
+      <SettingRow label="Local mode" description="Use local models only">
+        <button
+          className={`toggle${store.localMode ? ' active' : ''}`}
+          onClick={() => store.setLocalMode(!store.localMode)}
+        >
+          <span className="toggle-knob" />
+        </button>
+      </SettingRow>
+    </SectionCard>
+  </div>
+);
+
+// ─── Voice Section ───
+
+const VoiceSection: React.FC<any> = ({ 
+  store, interruptWordsInput, setInterruptWordsInput,
+  exitWordsInput, setExitWordsInput,
+  handleInterruptWordsBlur, handleExitWordsBlur 
+}) => (
+  <div className="settings-section-content">
+    <SectionCard title="Speech Detection">
+      <SettingRow label="Double-clap to wake" description="Wake voice mode with clap">
+        <button
+          className={`toggle${store.echoClapWakeEnabled ? ' active' : ''}`}
+          onClick={() => store.setEchoClapWakeEnabled(!store.echoClapWakeEnabled)}
+        >
+          <span className="toggle-knob" />
+        </button>
+      </SettingRow>
+      <SettingRow label="Wake word" description="Say a phrase to activate">
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            className={`toggle${store.echoWakeWordEnabled ? ' active' : ''}`}
+            onClick={() => store.setEchoWakeWordEnabled(!store.echoWakeWordEnabled)}
+          >
+            <span className="toggle-knob" />
+          </button>
+          {store.echoWakeWordEnabled && (
+            <input
+              className="setting-input"
+              style={{ width: 120 }}
+              value={store.echoWakeWord}
+              onChange={e => store.setEchoWakeWord(e.target.value)}
+              placeholder="hey hermes"
+            />
+          )}
+        </div>
+      </SettingRow>
+      <SettingRow label="Double-clap to minimize" description="Minimize with second clap">
+        <button
+          className={`toggle${store.echoDoubleClapMinimize ? ' active' : ''}`}
+          onClick={() => store.setEchoDoubleClapMinimize(!store.echoDoubleClapMinimize)}
+        >
+          <span className="toggle-knob" />
+        </button>
+      </SettingRow>
+      <SettingRow label="Clap sensitivity" vertical>
+        <div className="slider-wrapper" style={{ width: '100%' }}>
+          <input
+            type="range"
+            className="slider"
+            min="0.1"
+            max="1"
+            step="0.05"
+            value={store.echoClapSensitivity}
+            onChange={e => store.setEchoClapSensitivity(parseFloat(e.target.value))}
+          />
+          <span className="slider-value">{store.echoClapSensitivity.toFixed(2)}</span>
+        </div>
+      </SettingRow>
+    </SectionCard>
+
+    <SectionCard title="Text-to-Speech">
+      <SettingRow label="TTS provider">
+        <select
+          className="select"
+          value={store.echoTtsProvider}
+          onChange={e => store.setEchoTtsProvider(e.target.value)}
+        >
+          <option value="edge-tts">Edge TTS</option>
+          <option value="openai">OpenAI</option>
+          <option value="elevenlabs">ElevenLabs</option>
+          <option value="qwen3">Qwen3</option>
+        </select>
+      </SettingRow>
+      {store.echoTtsProvider === 'edge-tts' ? (
+        <SettingRow label="Voice" vertical>
+          <div className="voice-picker">
+            {EDGE_TTS_VOICES.map(v => (
+              <button
+                key={v.id}
+                className={`voice-option${store.echoTtsVoice === v.id ? ' active' : ''}`}
+                onClick={() => store.setEchoTtsVoice(v.id)}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+      ) : (
+        <SettingRow label="Voice ID">
+          <input
+            className="setting-input"
+            style={{ width: 160 }}
+            value={store.echoTtsVoice}
+            onChange={e => store.setEchoTtsVoice(e.target.value)}
+            placeholder="Voice ID"
+          />
+        </SettingRow>
+      )}
+      <SettingRow label="Voice always-on" description="Continuous listening mode">
+        <button
+          className={`toggle${store.echoVoiceModeEnabled ? ' active' : ''}`}
+          onClick={() => store.setEchoVoiceModeEnabled(!store.echoVoiceModeEnabled)}
+        >
+          <span className="toggle-knob" />
+        </button>
+      </SettingRow>
+    </SectionCard>
+
+    <SectionCard title="Voice Commands">
+      <SettingRow label="Interrupt words" description="Stop speaking when heard" vertical>
+        <input
+          className="setting-input"
+          value={interruptWordsInput}
+          onChange={e => setInterruptWordsInput(e.target.value)}
+          onBlur={handleInterruptWordsBlur}
+          placeholder="stop, wait, shut up"
+        />
+      </SettingRow>
+      <SettingRow label="Exit words" description="End voice session" vertical>
+        <input
+          className="setting-input"
+          value={exitWordsInput}
+          onChange={e => setExitWordsInput(e.target.value)}
+          onBlur={handleExitWordsBlur}
+          placeholder="goodbye, close, exit"
+        />
+      </SettingRow>
+    </SectionCard>
+  </div>
+);
+
+// ─── Memory Section ───
+
+const MemorySection: React.FC<any> = ({ 
+  api, memoryContent, setMemoryContent, userContent, setUserContent,
+  memoryDirty, setMemoryDirty, handleSaveMemory 
+}) => (
+  <div className="settings-section-content">
+    <SectionCard title="Agent Memory (MEMORY.md)" className="memory-card">
+      <div className="memory-editor">
+        <textarea
+          className="settings-textarea"
+          value={memoryContent}
+          onChange={e => { setMemoryContent(e.target.value); setMemoryDirty(true); }}
+          placeholder="Agent persistent memory — stored in MEMORY.md..."
+          rows={8}
+        />
+        <div className="memory-toolbar">
+          <button
+            className="btn btn-sm"
+            onClick={() => api?.readMemory?.().then((d: any) => { 
+              setMemoryContent(d?.memory || ''); 
+              setMemoryDirty(false); 
+            })}
+            title="Reload from disk"
+          >
+            <RotateCw style={{ width: 12, height: 12 }} />
+            Reload
+          </button>
+          {memoryDirty && (
+            <button className="btn btn-primary btn-sm" onClick={handleSaveMemory}>
+              <Check style={{ width: 12, height: 12 }} />
+              Save Memory
+            </button>
+          )}
+        </div>
+      </div>
+    </SectionCard>
+
+    <SectionCard title="User Profile (USER.md)" className="memory-card">
+      <div className="memory-editor">
+        <textarea
+          className="settings-textarea"
+          value={userContent}
+          onChange={e => { setUserContent(e.target.value); setMemoryDirty(true); }}
+          placeholder="User profile info — stored in USER.md..."
+          rows={5}
+        />
+      </div>
+    </SectionCard>
+  </div>
+);
+
+// ─── Data Section ───
+
+const DataSection: React.FC<any> = ({ api, confirmClear, handleClearHistory }) => (
+  <div className="settings-section-content">
+    <SectionCard title="Danger Zone">
+      <SettingRow 
+        label="Clear all sessions" 
+        description="Permanently delete all chat history"
+      >
+        <button
+          className={`btn btn-sm ${confirmClear ? 'btn-danger-confirm' : 'btn-danger'}`}
+          onClick={handleClearHistory}
+        >
+          <Trash2 style={{ width: 12, height: 12 }} />
+          {confirmClear ? 'Confirm delete?' : 'Clear history'}
+        </button>
+      </SettingRow>
+    </SectionCard>
+  </div>
+);

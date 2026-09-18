@@ -4,16 +4,14 @@ import { Sparkles, ArrowDown } from 'lucide-react';
 import { useOverlayStore, generateId } from '../store/overlayStore';
 import { MessageBubble } from './MessageBubble';
 import { EmptyState } from './ui/EmptyState';
-import { IconButton } from './ui/IconButton';
 
 export const Conversation: React.FC = () => {
-  const { messages, streamState, editFromMessage, retryFromMessage } = useOverlayStore();
+  const { messages, streamState, setStreamState, addMessage, sessionId, activeProvider, activeModel, toolMode } = useOverlayStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [showNewMsg, setShowNewMsg] = useState(false);
   const prevMsgCount = useRef(messages.length);
 
-  // Scroll detection — passive listener (lightweight, no blocking)
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -29,7 +27,6 @@ export const Conversation: React.FC = () => {
     return () => el.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  // Auto-scroll + new message detection
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -47,33 +44,98 @@ export const Conversation: React.FC = () => {
     setShowNewMsg(false);
   };
 
-  // Group messages by date for separators
+  // Edit message: find the user message and everything after it, remove them, put text in input
+  const handleEdit = useCallback((messageId: string) => {
+    const state = useOverlayStore.getState();
+    const idx = state.messages.findIndex(m => m.id === messageId);
+    if (idx === -1 || state.messages[idx].role !== 'user') return;
+
+    const content = state.messages[idx].content;
+    // Truncate messages to before this user message
+    const newMessages = state.messages.slice(0, idx);
+    useOverlayStore.setState({ messages: newMessages });
+
+    // Dispatch event to set input text
+    window.dispatchEvent(new CustomEvent('hermes-edit-message', { detail: content }));
+  }, []);
+
+  // Retry: remove messages after the one we're retrying, resubmit
+  const handleRetry = useCallback((messageId: string) => {
+    const state = useOverlayStore.getState();
+    const idx = state.messages.findIndex(m => m.id === messageId);
+    if (idx === -1) return;
+
+    // Find preceding user message
+    let userContent: string | null = null;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (state.messages[i].role === 'user') {
+        userContent = state.messages[i].content;
+        // Remove everything from the user message onwards
+        useOverlayStore.setState({ messages: state.messages.slice(0, i) });
+        break;
+      }
+    }
+
+    if (!userContent) return;
+
+    // Add user message
+    addMessage({
+      id: generateId(),
+      role: 'user',
+      content: userContent,
+      timestamp: Date.now(),
+    });
+
+    // Add streaming placeholder
+    addMessage({
+      id: generateId(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: true,
+    });
+
+    setStreamState({
+      isStreaming: true,
+      tokens: 0,
+      duration: 0,
+      mode: 'thinking',
+    });
+
+    const api = (window as any).electronAPI;
+    api?.sendMessage({
+      text: userContent,
+      sessionId,
+      toolMode,
+      provider: activeProvider,
+      model: activeModel,
+    });
+  }, [addMessage, setStreamState, sessionId, toolMode, activeProvider, activeModel]);
+
   const renderMessages = () => {
     let lastDateStr = '';
 
     return messages.map((msg, idx) => {
       const msgDate = new Date(msg.timestamp);
-      const dateStr = msgDate.toLocaleDateString(undefined, { 
-        weekday: 'long', 
-        month: 'short', 
-        day: 'numeric' 
+      const dateStr = msgDate.toLocaleDateString(undefined, {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric'
       });
-      
+
       const showDateSeparator = dateStr !== lastDateStr;
       if (showDateSeparator) {
         lastDateStr = dateStr;
       }
 
-      // Check if this is the active streaming message
       const isLastAssistantMessage = idx === messages.length - 1 && msg.role === 'assistant';
       const isStreaming = isLastAssistantMessage && streamState.isStreaming && !msg.cancelled;
 
-      // Determine streaming status label
       const getStreamingLabel = () => {
         switch (streamState.mode) {
           case 'thinking': return 'Thinking';
-          case 'tool': return 'Working';
-          case 'terminal': return 'Running';
+          case 'working': return 'Working';
+          case 'running': return 'Running';
           case 'searching': return 'Searching';
           default: return 'Thinking';
         }
@@ -82,7 +144,7 @@ export const Conversation: React.FC = () => {
       return (
         <React.Fragment key={msg.id || idx}>
           {showDateSeparator && (
-            <motion.div 
+            <motion.div
               className="date-separator"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -91,59 +153,26 @@ export const Conversation: React.FC = () => {
               <span className="date-separator-pill">{dateStr}</span>
             </motion.div>
           )}
-          
+
           <motion.div
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ 
-              duration: 0.35, 
-              type: 'spring', 
+            transition={{
+              duration: 0.35,
+              type: 'spring',
               bounce: 0.15,
               delay: 0.02
             }}
             className="message-row"
           >
-            <MessageBubble 
-              message={msg} 
-              onEdit={() => {
-                const content = editFromMessage(msg.id);
-                if (content) {
-                  window.dispatchEvent(new CustomEvent('hermes-edit-message', { detail: content }));
-                }
-              }}
-              onRetry={() => {
-                const content = retryFromMessage(msg.id);
-                if (content) {
-                  const api = (window as any).electronAPI;
-                  const state = useOverlayStore.getState();
-                  if (api?.sendMessage) {
-                    useOverlayStore.getState().addMessage({
-                      id: generateId(),
-                      role: 'user',
-                      content,
-                      timestamp: Date.now(),
-                    });
-                    useOverlayStore.getState().setStreamState({
-                      isStreaming: true,
-                      tokens: 0,
-                      duration: 0,
-                      mode: state.toolMode,
-                    });
-                    api.sendMessage({
-                      text: content,
-                      sessionId: state.sessionId,
-                      toolMode: state.toolMode,
-                      provider: state.activeProvider,
-                      model: state.activeModel,
-                    });
-                  }
-                }
-              }}
+            <MessageBubble
+              message={msg}
+              onEdit={msg.role === 'user' ? () => handleEdit(msg.id) : undefined}
+              onRetry={msg.role === 'assistant' ? () => handleRetry(msg.id) : undefined}
             />
 
-            {/* Streaming indicator */}
             {isStreaming && (
-              <motion.div 
+              <motion.div
                 className="stream-indicator"
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -172,7 +201,6 @@ export const Conversation: React.FC = () => {
     });
   };
 
-  // Empty state
   if (messages.length === 0) {
     return (
       <div className="conversation conversation--empty">
@@ -192,11 +220,10 @@ export const Conversation: React.FC = () => {
         {renderMessages()}
       </div>
 
-      {/* Floating scroll to bottom pill */}
       {(!autoScroll || showNewMsg) && (
         <div className="scroll-to-bottom-wrapper">
-          <button 
-            className={`scroll-to-bottom-btn ${showNewMsg ? 'has-new' : ''}`} 
+          <button
+            className={`scroll-to-bottom-btn ${showNewMsg ? 'has-new' : ''}`}
             onClick={scrollToBottom}
           >
             <ArrowDown size={14} />

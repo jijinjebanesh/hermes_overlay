@@ -8,7 +8,7 @@ import { CommandPalette } from '../components/command/CommandPalette';
 import { SettingsPanel } from '../components/settings/SettingsPanel';
 import { GuideModal } from '../components/GuideModal';
 import { useOverlayStore, generateId } from '../store/overlayStore';
-import type { StreamSegment, ToolStartSegment, ToolCompleteSegment } from '../store/overlayStore';
+import type { StreamSegment } from '../store/overlayStore';
 import { EchoMode } from '../components/EchoMode';
 import type { EchoSessionTurn } from '../hooks/useEchoSession';
 import { WakeWordListener } from '../components/WakeWordListener';
@@ -43,27 +43,24 @@ export const App: React.FC = () => {
     hydrateSession,
     isSettingsOpen,
     setSettingsOpen,
+    isHistoryOpen,
+    setHistoryOpen,
   } = useOverlayStore();
 
   const [isVisible, setIsVisible] = useState(true);
   const [isEchoMode, setIsEchoMode] = useState(false);
   const [echoTransitioning, setEchoTransitioning] = useState(false);
   const echoStartTimeRef = useRef<number>(0);
-
-  // Track open tool starts for lifecycle pairing (tool_start → tool_complete)
   const openToolIdsRef = useRef<Set<string>>(new Set());
-
-  // ── Command Palette state ──
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
 
-  // ── Surface state derivation ──
   const surfaceState = React.useMemo(() => {
     if (messages.length === 0) return 'query';
     if (messages.length > 6) return 'workspace';
     return 'conversation';
   }, [messages.length]);
 
-  // ── Theme & Font Engine ──
+  // Theme & Font
   useEffect(() => {
     if (fontFamily) {
       document.documentElement.style.setProperty('--font-sans', fontFamily);
@@ -86,12 +83,11 @@ export const App: React.FC = () => {
     }
   }, [theme, accentColor, fontFamily]);
 
-  // ── Focus helper ──
   const focusInput = useCallback(() => {
     setTimeout(() => inputRef.current?.focus(), 80);
-  }, [inputRef]);
+  }, []);
 
-  // ── Inventory fetch ──
+  // Inventory fetch
   useEffect(() => {
     if (!api?.getInventory) return;
     setInventoryLoading(true);
@@ -112,78 +108,36 @@ export const App: React.FC = () => {
       .finally(() => setInventoryLoading(false));
   }, [setInventory, setInventoryLoading, setActiveModel, setActiveProvider]);
 
-  // ── IPC Listeners ──
+  // IPC Listeners
   useEffect(() => {
     if (!api) return;
-
     const cleanups: (() => void)[] = [];
 
-    // Visibility changes
     if (api.onVisibilityChange) {
       cleanups.push(api.onVisibilityChange((visible: boolean) => {
         setIsVisible(visible);
         if (visible) {
           focusInput();
-          const state = useOverlayStore.getState();
-          if (state.autoCaptureContext && api.captureContext) {
-            setTimeout(async () => {
-              try {
-                const ctx = await api.captureContext!();
-                if (!ctx) return;
-                if (ctx.clipboardText) {
-                  useOverlayStore.getState().addPendingAttachments([{
-                    id: generateId(),
-                    name: 'Clipboard.txt',
-                    path: `clipboard://auto_${Date.now()}`,
-                    content: ctx.clipboardText,
-                    tooBig: ctx.clipboardText.length > 100_000,
-                    size: ctx.clipboardText.length,
-                    ext: 'txt',
-                    isImage: false,
-                  }]);
-                }
-                if (ctx.screenshot) {
-                  const fileResult = await api.readDroppedFile(ctx.screenshot.path);
-                  if (fileResult) {
-                    useOverlayStore.getState().addPendingAttachments([{
-                      ...fileResult,
-                      ext: fileResult.ext || 'png',
-                      isImage: true,
-                      id: generateId(),
-                    }]);
-                  }
-                }
-              } catch (e) {
-                console.error('[AutoContext] Capture failed:', e);
-              }
-            }, 50);
-          }
         } else {
           setIsEchoMode(false);
         }
       }));
     }
 
-    // Focus input
     if (api.onFocusInput) {
       cleanups.push(api.onFocusInput(() => focusInput()));
     }
 
-    // ── Structured stream segments (TUI-style) ──
     if (api.onStreamSegment) {
       cleanups.push(api.onStreamSegment((segment: StreamSegment) => {
-        // Handle tool lifecycle: tool_start opens, tool_complete closes
         if (segment.type === 'tool_start') {
-          openToolIdsRef.current.add(segment.toolId);
-          // Tool start is a transient event — we track it in store for pairing
-          // but the display is handled by the tool_complete rendering
+          openToolIdsRef.current.add(segment.toolId || '');
         } else if (segment.type === 'tool_complete') {
-          openToolIdsRef.current.delete(segment.toolId);
+          openToolIdsRef.current.delete(segment.toolId || '');
         }
 
         appendSegmentToLast(segment);
 
-        // Only set streaming true for content segments (not tool lifecycle markers)
         if (segment.type === 'text' || segment.type === 'thinking' ||
             segment.type === 'reasoning' || segment.type === 'diff' ||
             segment.type === 'tool_complete' || segment.type === 'clarify') {
@@ -195,7 +149,6 @@ export const App: React.FC = () => {
       }));
     }
 
-    // Stream end
     if (api.onStreamEnd) {
       cleanups.push(api.onStreamEnd((result: { code: number | null }) => {
         openToolIdsRef.current.clear();
@@ -223,39 +176,31 @@ export const App: React.FC = () => {
       }));
     }
 
-    // Stream error
     if (api.onStreamError) {
       cleanups.push(api.onStreamError((error: string) => {
         openToolIdsRef.current.clear();
         setStreamState({ isStreaming: false });
-        const isENOENT = error.includes('ENOENT') || error.includes('spawn hermes');
-        const friendly = isENOENT
-          ? 'Hermes CLI not found. Install it with `npm install -g @anthropic/hermes` or add it to your PATH.'
-          : `Error: ${error}`;
         addMessage({
           id: generateId(),
           role: 'assistant',
-          content: friendly,
+          content: `Error: ${error}`,
           timestamp: Date.now(),
         });
       }));
     }
 
-    // Echo mode handler
     if (api.onEnterEchoMode) {
       cleanups.push(api.onEnterEchoMode(() => {
         setIsEchoMode(true);
       }));
     }
 
-    // Push-to-Talk
     if (api.onPushToTalkStart) {
       cleanups.push(api.onPushToTalkStart(() => {
         window.dispatchEvent(new CustomEvent('push-to-talk-toggle'));
       }));
     }
 
-    // Background task updates
     if (api.onBackgroundTaskUpdate) {
       cleanups.push(api.onBackgroundTaskUpdate((task: any) => {
         const state = useOverlayStore.getState();
@@ -268,26 +213,10 @@ export const App: React.FC = () => {
       }));
     }
 
-    // Background task clicked
-    if (api.onBackgroundTaskClicked) {
-      cleanups.push(api.onBackgroundTaskClicked((taskId: string) => {
-        const state = useOverlayStore.getState();
-        const task = state.backgroundTasks.find((t: any) => t.id === taskId);
-        if (task && task.status === 'completed') {
-          state.addMessage({
-            id: generateId(),
-            role: 'assistant',
-            content: `**Background Task Complete**\n\n${task.output || '(no output)'}`,
-            timestamp: Date.now(),
-          });
-        }
-      }));
-    }
-
     return () => cleanups.forEach(fn => fn());
   }, [addMessage, appendSegmentToLast, focusInput, setStreamState, updateLastMessage]);
 
-  // ── Keyboard Shortcuts ──
+  // Keyboard Shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.shiftKey) {
@@ -316,10 +245,14 @@ export const App: React.FC = () => {
         e.preventDefault();
         cycleToolMode();
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'h' && !e.shiftKey) {
+        e.preventDefault();
+        setHistoryOpen(!isHistoryOpen);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isEchoMode, cycleToolMode, isSettingsOpen, newSession, focusInput, setSettingsOpen]);
+  }, [isEchoMode, cycleToolMode, isSettingsOpen, isHistoryOpen, newSession, focusInput, setSettingsOpen, setHistoryOpen]);
 
   // Stream duration timer
   useEffect(() => {
@@ -334,7 +267,7 @@ export const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // ── Prevent Electron from navigating on file drop ──
+  // Prevent Electron from navigating on file drop
   useEffect(() => {
     const preventNav = (e: DragEvent) => {
       e.preventDefault();
@@ -348,7 +281,7 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // ── Drag & Drop Handlers ──
+  // Drag & Drop Handlers
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -413,7 +346,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // ── Echo Mode Helpers ──
   const enterEchoMode = useCallback(() => {
     echoStartTimeRef.current = Date.now();
     setEchoTransitioning(true);
@@ -446,18 +378,18 @@ export const App: React.FC = () => {
     }
   }, [addMessage, focusInput]);
 
-  // ── Session switching ──
   const handleSwitchSession = useCallback(async (sessionId: string) => {
     if (!api?.getSession) return;
     try {
       const messages: any = await api.getSession(sessionId);
       if (Array.isArray(messages)) {
         hydrateSession(sessionId, messages);
+        setHistoryOpen(false);
       }
     } catch (e) {
       console.error('Failed to load session:', e);
     }
-  }, [hydrateSession]);
+  }, [hydrateSession, setHistoryOpen]);
 
   const showContextBar = surfaceState !== 'query';
   const showDragOverlay = isDragging;
@@ -497,6 +429,7 @@ export const App: React.FC = () => {
           <ContextBar
             onMoreClick={() => setIsPaletteOpen(true)}
             onNewSession={() => { newSession(); focusInput(); }}
+            onToggleHistory={() => setHistoryOpen(!isHistoryOpen)}
             showNewButton={true}
           />
 

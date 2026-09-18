@@ -78,7 +78,6 @@ export const useSessionActions = () =>
     clearSession: s.clearSession,
     newSession: s.newSession,
     hydrateSession: s.hydrateSession,
-    undo: s.undo,
   }));
 
 export const useStreamActions = () =>

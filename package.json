@@ -1,7 +1,7 @@
 {
   "name": "hermes-desktop",
-  "version": "0.1.0",
-  "description": "Hermes Desktop Overlay — Professional terminal-like experience for macOS/iOS",
+  "version": "0.2.0",
+  "description": "Hermes Desktop Overlay — Professional CLI overlay for Hermes Agent",
   "type": "module",
   "main": "dist-electron/main/main.cjs",
   "scripts": {
@@ -14,16 +14,24 @@
     "start": "electron ."
   },
   "dependencies": {
+    "clsx": "^2.1.1",
+    "electron-store": "^8.2.0",
+    "framer-motion": "^11.11.17",
+    "lucide-react": "^0.456.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@hookform/resolvers": "^5.0.4",
-    "zod": "^3.24.1"
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.24.1",
+    "zustand": "^4.5.5"
   },
   "devDependencies": {
     "@types/react": "~18.3.23",
     "@types/react-dom": "~18.3.5",
     "@vitejs/plugin-react": "^4.5.0",
     "autoprefixer": "^10.4.20",
+    "electron": "^33.0.0",
     "postcss": "^8.5.4",
     "tailwindcss": "^3.4.17",
     "typescript": "~5.6.2"

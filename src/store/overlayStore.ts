@@ -1,12 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { SemanticBlock } from '../semantic/types';
 
 /* ═══════════════════════════════════════════════
    TYPES
    ═══════════════════════════════════════════════ */
 
 export type ToolMode = 'all' | 'terminal' | 'none';
+export type Theme = 'system' | 'light' | 'dark';
 
 export interface ToolCall {
   id: string;
@@ -15,77 +15,6 @@ export interface ToolCall {
   output?: string;
   status: 'pending' | 'success' | 'error';
 }
-
-// ── New TUI-style segment types (replacing old flat tool_activity) ──
-
-import type { DiffLine } from '../tool-parser';
-
-export interface ToolStartSegment {
-  type: 'tool_start';
-  toolId: string;
-  name: string;
-  args: Record<string, any>;
-  display: string;
-}
-
-export interface ToolCompleteSegment {
-  type: 'tool_complete';
-  toolId: string;
-  name: string;
-  args: Record<string, any>;
-  result: any;
-  durationS?: number;
-  duration_s?: number;
-  inlineDiff?: string;
-  inline_diff?: string;
-  diffLines?: DiffLine[];
-  error?: string;
-  display: string;
-}
-
-export interface ClarifySegment {
-  type: 'clarify';
-  question: string;
-  choices?: string[];
-  multiSelect?: boolean;
-  answer?: string;
-}
-
-export interface FileNoticeSegment {
-  type: 'file_notice';
-  filename: string;
-}
-
-export interface ThinkingSegment {
-  type: 'thinking';
-  content: string;
-}
-
-export interface ReasoningSegment {
-  type: 'reasoning';
-  content: string;
-}
-
-export interface DiffSegment {
-  type: 'diff';
-  content: string;
-  diffLines?: DiffLine[];
-}
-
-export interface TextSegment {
-  type: 'text';
-  content: string;
-}
-
-export type StreamSegment =
-  | ToolStartSegment
-  | ToolCompleteSegment
-  | ClarifySegment
-  | FileNoticeSegment
-  | ThinkingSegment
-  | ReasoningSegment
-  | DiffSegment
-  | TextSegment;
 
 export interface AttachedFile {
   id: string;
@@ -98,6 +27,16 @@ export interface AttachedFile {
   isImage: boolean;
 }
 
+export type StreamSegment =
+  | { type: 'text'; content?: string }
+  | { type: 'tool_start'; toolId?: string; name?: string; args?: Record<string, any>; display?: string }
+  | { type: 'tool_complete'; toolId?: string; name?: string; args?: Record<string, any>; result?: any; durationS?: number; inlineDiff?: string; diffLines?: Array<{ type: string; text: string }>; error?: string; display?: string }
+  | { type: 'clarify'; question?: string; choices?: string[]; multiSelect?: boolean; answer?: string }
+  | { type: 'thinking'; content?: string }
+  | { type: 'reasoning'; content?: string }
+  | { type: 'diff'; content?: string; diffLines?: Array<{ type: string; text: string }> }
+  | { type: 'file_notice'; filename?: string };
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -106,21 +45,17 @@ export interface Message {
   isStreaming?: boolean;
   cancelled?: boolean;
   toolCalls?: ToolCall[];
-  /** Structured segments from hermes output (TUI-style tool lifecycle, diffs, thinking, text) */
   segments?: StreamSegment[];
   attachments?: AttachedFile[];
-  blocks?: SemanticBlock[];
 }
 
 export interface StreamState {
   isStreaming: boolean;
   tokens: number;
   duration: number;
-  mode: string;
-  sessionTokens?: number;
+  mode: 'thinking' | 'working' | 'running' | 'searching' | 'idle';
 }
 
-/** Live provider from hermes inventory */
 export interface InventoryProvider {
   slug: string;
   name: string;
@@ -133,7 +68,6 @@ export interface InventoryProvider {
   warning: string;
 }
 
-
 /* ═══════════════════════════════════════════════
    STORE INTERFACE
    ═══════════════════════════════════════════════ */
@@ -145,12 +79,10 @@ interface OverlayState {
 
   // Stream state
   streamState: StreamState;
-  uiState: Record<string, any>;
 
   // Input & Tools
   toolMode: ToolMode;
   inputHistory: string[];
-  historyIndex: number;
   pendingAttachments: AttachedFile[];
 
   // Config
@@ -158,19 +90,19 @@ interface OverlayState {
   activeModel: string;
   activeProvider: string;
 
-  // Live inventory from hermes
+  // Live inventory
   inventory: InventoryProvider[];
   inventoryLoading: boolean;
 
-  // Settings State
+  // UI State
   isSettingsOpen: boolean;
-  settingsSidebarCollapsed: boolean;
+  isHistoryOpen: boolean;
   isGuideOpen: boolean;
   launchAtStartup: boolean;
   globalHotkey: string;
   alwaysOnTop: boolean;
   smallWindow: boolean;
-  theme: 'system' | 'light' | 'dark';
+  theme: Theme;
   accentColor: string;
   fontFamily: string;
 
@@ -180,7 +112,7 @@ interface OverlayState {
   echoInterruptWords: string[];
   echoExitWords: string[];
   echoClapSensitivity: number;
-  echoTtsProvider: 'elevenlabs' | 'edge-tts' | 'openai' | 'qwen3';
+  echoTtsProvider: string;
   echoTtsVoice: string;
   echoWakeWordEnabled: boolean;
   echoWakeWord: string;
@@ -195,41 +127,20 @@ interface OverlayState {
 
   // Actions
   setSettingsOpen: (open: boolean) => void;
-  setSettingsSidebarCollapsed: (collapsed: boolean) => void;
+  setHistoryOpen: (open: boolean) => void;
   setGuideOpen: (open: boolean) => void;
   setLaunchAtStartup: (enable: boolean) => void;
   setGlobalHotkey: (key: string) => void;
   setAlwaysOnTop: (always: boolean) => void;
-
   setSmallWindow: (s: boolean) => void;
-  setTheme: (t: 'system' | 'light' | 'dark') => void;
+  setTheme: (t: Theme) => void;
   setAccentColor: (color: string) => void;
   setFontFamily: (f: string) => void;
-  setEchoClapWakeEnabled: (enabled: boolean) => void;
-  setEchoInterruptWords: (words: string[]) => void;
-  setEchoExitWords: (words: string[]) => void;
-  setEchoVoiceModeEnabled: (enabled: boolean) => void;
-  setEchoClapSensitivity: (sensitivity: number) => void;
-  setEchoTtsProvider: (provider: 'elevenlabs' | 'edge-tts' | 'openai' | 'qwen3') => void;
-  setEchoTtsVoice: (voice: string) => void;
-  setEchoWakeWordEnabled: (enabled: boolean) => void;
-  setEchoWakeWord: (word: string) => void;
-  setEchoDoubleClapMinimize: (enabled: boolean) => void;
-  setAutoCaptureContext: (enabled: boolean) => void;
-  setAutoCaptureScreenshot: (enabled: boolean) => void;
-  setBackgroundTasks: (tasks: any[]) => void;
-  addBackgroundTask: (task: any) => void;
-  updateBackgroundTask: (task: any) => void;
-  clearBackgroundTask: (taskId: string) => void;
   setToolMode: (mode: ToolMode) => void;
 
   addMessage: (msg: Message) => void;
   updateLastMessage: (updater: (msg: Message) => Message) => void;
   appendSegmentToLast: (segment: StreamSegment) => void;
-  hydrateBlocks: (messageId: string, blocks: SemanticBlock[]) => void;
-  updateBlockUIState: (blockId: string, patch: Record<string, any>) => void;
-  editFromMessage: (messageId: string) => string | null;
-  retryFromMessage: (messageId: string) => string | null;
   clearSession: () => void;
   newSession: () => void;
   hydrateSession: (sessionId: string, messages: Message[]) => void;
@@ -241,12 +152,28 @@ interface OverlayState {
   setInventory: (providers: InventoryProvider[]) => void;
   setInventoryLoading: (loading: boolean) => void;
   addToHistory: (input: string) => void;
-  undo: (turns: number) => void;
   addPendingAttachments: (files: AttachedFile[]) => void;
   removePendingAttachment: (fileId: string) => void;
   clearPendingAttachments: () => void;
-}
 
+  setEchoClapWakeEnabled: (enabled: boolean) => void;
+  setEchoInterruptWords: (words: string[]) => void;
+  setEchoExitWords: (words: string[]) => void;
+  setEchoVoiceModeEnabled: (enabled: boolean) => void;
+  setEchoClapSensitivity: (sensitivity: number) => void;
+  setEchoTtsProvider: (provider: string) => void;
+  setEchoTtsVoice: (voice: string) => void;
+  setEchoWakeWordEnabled: (enabled: boolean) => void;
+  setEchoWakeWord: (word: string) => void;
+  setEchoDoubleClapMinimize: (enabled: boolean) => void;
+  setAutoCaptureContext: (enabled: boolean) => void;
+  setAutoCaptureScreenshot: (enabled: boolean) => void;
+
+  setBackgroundTasks: (tasks: any[]) => void;
+  addBackgroundTask: (task: any) => void;
+  updateBackgroundTask: (task: any) => void;
+  clearBackgroundTask: (taskId: string) => void;
+}
 
 /* ═══════════════════════════════════════════════
    HELPERS
@@ -254,7 +181,6 @@ interface OverlayState {
 
 export const generateId = () =>
   crypto.randomUUID?.() || Math.random().toString(36).substring(2, 15);
-
 
 /* ═══════════════════════════════════════════════
    STORE
@@ -270,14 +196,11 @@ export const useOverlayStore = create<OverlayState>()(
         isStreaming: false,
         tokens: 0,
         duration: 0,
-        mode: 'none',
-        sessionTokens: 0,
+        mode: 'idle',
       },
-      uiState: {},
 
       toolMode: 'all' as ToolMode,
       inputHistory: [],
-      historyIndex: -1,
       pendingAttachments: [],
 
       localMode: false,
@@ -287,19 +210,19 @@ export const useOverlayStore = create<OverlayState>()(
       inventory: [],
       inventoryLoading: false,
 
-      // Settings
+      // UI State
       isSettingsOpen: false,
-      settingsSidebarCollapsed: true,
+      isHistoryOpen: false,
       isGuideOpen: false,
       launchAtStartup: false,
       globalHotkey: 'CommandOrControl+Alt+H',
       alwaysOnTop: true,
-
       smallWindow: false,
-      theme: 'system',
+      theme: 'system' as Theme,
       accentColor: 'blue',
       fontFamily: 'system-ui',
 
+      // Echo Settings
       echoClapWakeEnabled: true,
       echoVoiceModeEnabled: false,
       echoInterruptWords: ['stop', 'wait', 'shut up', 'hey hermes'],
@@ -310,14 +233,15 @@ export const useOverlayStore = create<OverlayState>()(
       echoWakeWordEnabled: false,
       echoWakeWord: 'hey hermes',
       echoDoubleClapMinimize: false,
-      autoCaptureContext: true as boolean,
-      autoCaptureScreenshot: false as boolean,
-      backgroundTasks: [] as any[],
+
+      autoCaptureContext: true,
+      autoCaptureScreenshot: false,
+      backgroundTasks: [],
 
       /* ── Actions ── */
 
       setSettingsOpen: (open) => set({ isSettingsOpen: open }),
-      setSettingsSidebarCollapsed: (collapsed) => set({ settingsSidebarCollapsed: collapsed }),
+      setHistoryOpen: (open) => set({ isHistoryOpen: open }),
       setGuideOpen: (open) => set({ isGuideOpen: open }),
       setLaunchAtStartup: (enable) => {
         set({ launchAtStartup: enable });
@@ -331,7 +255,6 @@ export const useOverlayStore = create<OverlayState>()(
         set({ alwaysOnTop: enable });
         window.electronAPI?.setAlwaysOnTop(enable);
       },
-
       setSmallWindow: (enable) => {
         set({ smallWindow: enable });
         window.electronAPI?.setSmallWindow(enable);
@@ -362,46 +285,23 @@ export const useOverlayStore = create<OverlayState>()(
 
           let segments = [...(last.segments || [])];
 
-          // When a clarify segment arrives, remove any pending tool_start for clarify
-          // so the clarify card cleanly replaces the tool pill
-          if (segment.type === 'clarify') {
-            const toolIdx = segments.findIndex(
-              (s) => (s.type === 'tool_start' || s.type === 'tool_complete') && (s as any).name === 'clarify'
+          if (segment.type === 'tool_complete' && segment.toolId) {
+            const startIdx = segments.findIndex(
+              (s) => s.type === 'tool_start' && s.toolId === segment.toolId
             );
-            if (toolIdx !== -1) {
-              segments.splice(toolIdx, 1);
-            }
-
-            const existingIdx = segments.findIndex(
-              (s) => s.type === 'clarify' && (s as ClarifySegment).question === segment.question
-            );
-            if (existingIdx !== -1) {
-              segments[existingIdx] = {
-                ...(segments[existingIdx] as ClarifySegment),
-                ...segment,
-                choices: segment.choices && segment.choices.length > 0 ? segment.choices : (segments[existingIdx] as ClarifySegment).choices,
-              };
+            if (startIdx !== -1) {
+              segments[startIdx] = segment;
             } else {
               segments.push(segment);
             }
-          } else if (segment.type === 'tool_complete') {
-            // Drop tool_complete for clarify if a clarify segment already exists
-            if (segment.name === 'clarify' && segments.some((s) => s.type === 'clarify')) {
-              return state;
-            }
-            let startIdx = -1;
-            if (segment.toolId) {
-              startIdx = segments.findIndex(
-                (s) => s.type === 'tool_start' && (s as ToolStartSegment).toolId === segment.toolId
-              );
-            }
-            if (startIdx === -1 && segment.name) {
-              startIdx = segments.findIndex(
-                (s) => s.type === 'tool_start' && (s as ToolStartSegment).name === segment.name
-              );
-            }
-            if (startIdx !== -1) {
-              segments[startIdx] = segment;
+          } else if (segment.type === 'text') {
+            // Merge consecutive text segments
+            const lastSeg = segments[segments.length - 1];
+            if (lastSeg && lastSeg.type === 'text') {
+              segments[segments.length - 1] = {
+                ...lastSeg,
+                content: (lastSeg.content || '') + segment.content,
+              };
             } else {
               segments.push(segment);
             }
@@ -409,9 +309,8 @@ export const useOverlayStore = create<OverlayState>()(
             segments.push(segment);
           }
 
-          // Also update the text content for text segments
           if (segment.type === 'text') {
-            last.content = (last.content || '') + (last.content ? '\n' : '') + segment.content;
+            last.content = (last.content || '') + (last.content ? '\n' : '') + (segment.content || '');
           }
 
           last.segments = segments;
@@ -422,53 +321,11 @@ export const useOverlayStore = create<OverlayState>()(
       clearSession: () =>
         set({ messages: [], sessionId: generateId() }),
 
-      editFromMessage: (messageId) => {
-        const state = get();
-        const idx = state.messages.findIndex((m) => m.id === messageId);
-        if (idx === -1) return null;
-        const msg = state.messages[idx];
-        if (msg.role !== 'user') return null;
-        set({ messages: state.messages.slice(0, idx) });
-        return msg.content;
-      },
-
-      retryFromMessage: (messageId) => {
-        const state = get();
-        const idx = state.messages.findIndex((m) => m.id === messageId);
-        if (idx === -1) return null;
-        const msg = state.messages[idx];
-        if (msg.role !== 'assistant') return null;
-        let userContent: string | null = null;
-        for (let i = idx - 1; i >= 0; i--) {
-          if (state.messages[i].role === 'user') {
-            userContent = state.messages[i].content;
-            set({ messages: state.messages.slice(0, i) });
-            break;
-          }
-        }
-        return userContent;
-      },
-
       newSession: () =>
         set({ messages: [], sessionId: generateId() }),
 
       hydrateSession: (sessionId, messages) =>
         set({ sessionId, messages }),
-
-      hydrateBlocks: (messageId, blocks) =>
-        set((state) => ({
-          messages: state.messages.map((message) =>
-            message.id === messageId ? { ...message, blocks } : message
-          ),
-        })),
-
-      updateBlockUIState: (blockId, patch) =>
-        set((state) => ({
-          uiState: {
-            ...state.uiState,
-            [blockId]: { ...(state.uiState[blockId] || {}), ...patch },
-          },
-        })),
 
       setStreamState: (newState) =>
         set((state) => ({
@@ -496,16 +353,17 @@ export const useOverlayStore = create<OverlayState>()(
           };
         }),
 
-      undo: (turns) =>
-        set((state) => {
-          const toRemove = turns * 2;
-          return {
-            messages: state.messages.slice(
-              0,
-              Math.max(0, state.messages.length - toRemove)
-            ),
-          };
-        }),
+      addPendingAttachments: (files) =>
+        set((state) => ({
+          pendingAttachments: [...state.pendingAttachments, ...files],
+        })),
+
+      removePendingAttachment: (fileId) =>
+        set((state) => ({
+          pendingAttachments: state.pendingAttachments.filter(f => f.id !== fileId),
+        })),
+
+      clearPendingAttachments: () => set({ pendingAttachments: [] }),
 
       setEchoClapWakeEnabled: (enabled) => {
         set({ echoClapWakeEnabled: enabled });
@@ -513,19 +371,6 @@ export const useOverlayStore = create<OverlayState>()(
       },
       setEchoInterruptWords: (words) => set({ echoInterruptWords: words }),
       setEchoExitWords: (words) => set({ echoExitWords: words }),
-
-      addPendingAttachments: (files) =>
-        set((state) => ({
-          pendingAttachments: [...state.pendingAttachments, ...files]
-        })),
-
-      removePendingAttachment: (fileId) =>
-        set((state) => ({
-          pendingAttachments: state.pendingAttachments.filter(f => f.id !== fileId)
-        })),
-
-      clearPendingAttachments: () => set({ pendingAttachments: [] }),
-
       setEchoVoiceModeEnabled: (enabled) => {
         set({ echoVoiceModeEnabled: enabled });
         window.electronAPI?.echoSettingsChanged?.({ echoVoiceModeEnabled: enabled });
@@ -550,6 +395,7 @@ export const useOverlayStore = create<OverlayState>()(
       },
       setAutoCaptureContext: (enabled) => set({ autoCaptureContext: enabled }),
       setAutoCaptureScreenshot: (enabled) => set({ autoCaptureScreenshot: enabled }),
+
       setBackgroundTasks: (tasks) => set({ backgroundTasks: tasks }),
       addBackgroundTask: (task) => set((state) => ({
         backgroundTasks: [task, ...state.backgroundTasks].slice(0, 50),
@@ -574,7 +420,6 @@ export const useOverlayStore = create<OverlayState>()(
         launchAtStartup: state.launchAtStartup,
         globalHotkey: state.globalHotkey,
         alwaysOnTop: state.alwaysOnTop,
-
         smallWindow: state.smallWindow,
         toolMode: state.toolMode,
         theme: state.theme,

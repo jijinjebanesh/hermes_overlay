@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Square, ArrowUp, AudioLines, Zap } from 'lucide-react';
+import { Square, ArrowUp, AudioLines, Zap, CornerDownLeft } from 'lucide-react';
 import { useOverlayStore, generateId } from '../store/overlayStore';
 import { getElectronAPI } from '../hooks/useElectronAPI';
 import { AttachmentBar } from './input/AttachmentBar';
@@ -18,7 +18,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
   const {
     toolMode, streamState,
     addMessage, addToHistory, inputHistory,
-    clearSession, newSession, undo, localMode,
+    clearSession, newSession, localMode,
     sessionId, setStreamState, updateLastMessage,
     pendingAttachments, addPendingAttachments, removePendingAttachment, clearPendingAttachments
   } = useOverlayStore();
@@ -32,12 +32,14 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
   const [echoTooltip, setEchoTooltip] = useState<string | null>(null);
 
   // ── AUTOCOMPLETE STATE ──
-  const [suggestions, setSuggestions] = useState<Array<{name: string, isDir: boolean, size: number}>>([]);
+  const [suggestions, setSuggestions] = useState<Array<{name: string; isDir: boolean; size: number; isCommand?: boolean}>>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [autocompletePrefix, setAutocompletePrefix] = useState('');
   const [autocompleteQuery, setAutocompleteQuery] = useState('');
   const [isAutocompleteOpen, setIsAutocompleteOpen] = useState(false);
   const [lastWord, setLastWord] = useState('');
+  const [autocompleteType, setAutocompleteType] = useState<'file' | 'command'>('file');
+
   // Focus on mount
   useEffect(() => {
     inputRef.current?.focus();
@@ -54,7 +56,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         if (inputRef.current) {
           inputRef.current.style.height = 'auto';
           const sh = inputRef.current.scrollHeight;
-          inputRef.current.style.height = Math.min(sh, 96) + 'px';
+          inputRef.current.style.height = Math.min(sh, 200) + 'px';
         }
       }, 50);
     };
@@ -62,6 +64,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     return () => window.removeEventListener('hermes-edit-message', handler);
   }, [inputRef]);
 
+  // Global Escape handler
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -84,7 +87,99 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     if (inputRef.current) inputRef.current.style.height = 'auto';
   }, [inputRef]);
 
+  // ── AUTOCOMPLETE LOGIC ──
+  const fetchFileSuggestions = async (dirPath: string, query: string, word: string) => {
+    setAutocompletePrefix(dirPath);
+    setAutocompleteQuery(query);
+    setLastWord(word);
+    setAutocompleteType('file');
+
+    try {
+      if (api?.readDir) {
+        const results = await api.readDir(dirPath);
+        const filtered = results.filter((r: any) => r.name.toLowerCase().startsWith(query.toLowerCase()));
+        setSuggestions(filtered);
+        setSelectedSuggestionIndex(filtered.length > 0 ? 0 : -1);
+        setIsAutocompleteOpen(filtered.length > 0);
+      }
+    } catch (e) {
+      setIsAutocompleteOpen(false);
+    }
+  };
+
+  const fetchCommandSuggestions = useCallback((query: string) => {
+    const prefix = query.startsWith('/') ? query : '/' + query;
+    const filtered = SLASH_COMMANDS.filter(cmd => cmd.startsWith(prefix));
+    if (filtered.length > 0) {
+      setSuggestions(filtered.map(cmd => ({ name: cmd, isDir: false, size: 0, isCommand: true })));
+      setAutocompleteType('command');
+      setSelectedSuggestionIndex(0);
+      setIsAutocompleteOpen(true);
+      setAutocompletePrefix('');
+      setAutocompleteQuery(query);
+      setLastWord(query);
+    } else {
+      setIsAutocompleteOpen(false);
+    }
+  }, []);
+
+  const handleSelectSuggestion = (index: number) => {
+    const selected = suggestions[index];
+    if (!selected) return;
+
+    if (autocompleteType === 'command') {
+      setInput(selected.name + ' ');
+      setIsAutocompleteOpen(false);
+    } else {
+      const newPath = autocompletePrefix + selected.name + (selected.isDir ? '/' : '');
+      const newInput = input.slice(0, -lastWord.length) + newPath;
+      setInput(newInput);
+      setIsAutocompleteOpen(false);
+      if (selected.isDir) fetchFileSuggestions(newPath, '', newPath);
+    }
+    inputRef.current?.focus();
+  };
+
+  // ── INPUT HANDLER ──
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInput(val);
+    setHistoryIndex(-1);
+
+    // Check for slash command autocomplete
+    if (val.startsWith('/')) {
+      fetchCommandSuggestions(val);
+      return;
+    }
+
+    // Check for path autocomplete
+    const words = val.split(/\s+/);
+    const word = words[words.length - 1];
+    const isPath = /^(?:[a-zA-Z]:[/\\]|[/]|\.[/\\]|\.\.[/\\]|~[/\\])/.test(word);
+    if (isPath) {
+      const lastSlashIndex = Math.max(word.lastIndexOf('/'), word.lastIndexOf('\\'));
+      if (lastSlashIndex !== -1) {
+        const dirPath = word.substring(0, lastSlashIndex + 1);
+        const query = word.substring(lastSlashIndex + 1);
+        fetchFileSuggestions(dirPath, query, word);
+      } else {
+        setIsAutocompleteOpen(false);
+      }
+    } else {
+      setIsAutocompleteOpen(false);
+    }
+
+    // Auto-resize
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      const sh = inputRef.current.scrollHeight;
+      inputRef.current.style.height = Math.min(sh, 200) + 'px';
+    }
+  };
+
+  // ── KEYBOARD HANDLER ──
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Autocomplete navigation
     if (isAutocompleteOpen && suggestions.length > 0) {
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -96,13 +191,14 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         setSelectedSuggestionIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : 0));
         return;
       }
-      if (e.key === 'Tab' || e.key === 'Enter') {
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.ctrlKey && !e.metaKey)) {
         e.preventDefault();
         handleSelectSuggestion(selectedSuggestionIndex);
         return;
       }
     }
 
+    // Tab for slash command completion
     if (e.key === 'Tab') {
       e.preventDefault();
       if (input.startsWith('/')) {
@@ -112,7 +208,8 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       return;
     }
 
-    if (e.key === 'ArrowUp') {
+    // History navigation (only when not in autocomplete)
+    if (e.key === 'ArrowUp' && !isAutocompleteOpen) {
       if (input === '' || historyIndex !== -1) {
         e.preventDefault();
         if (inputHistory.length > 0) {
@@ -124,7 +221,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       }
     }
 
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' && !isAutocompleteOpen) {
       if (historyIndex !== -1) {
         e.preventDefault();
         if (historyIndex > 0) {
@@ -139,17 +236,52 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       }
     }
 
+    // Enter key behavior:
+    // - Enter alone: send
+    // - Shift+Enter: newline (multiline)
+    // - Ctrl+Enter: newline (multiline) - NOT background send
+    // - Ctrl+Shift+Enter: background send
     if (e.key === 'Enter') {
-      if (e.shiftKey) return;
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey) {
+      if (e.ctrlKey && e.shiftKey) {
+        // Ctrl+Shift+Enter → background send
+        e.preventDefault();
         handleBackgroundSend();
-      } else {
-        handleSubmit();
+        return;
       }
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+Enter or Cmd+Enter → insert newline
+        e.preventDefault();
+        insertNewline();
+        return;
+      }
+      if (e.shiftKey) {
+        // Shift+Enter → insert newline (allow default behavior)
+        return; // let the default newline insertion happen
+      }
+      // Enter alone → send
+      e.preventDefault();
+      handleSubmit();
     }
   };
 
+  const insertNewline = () => {
+    if (!inputRef.current) return;
+    const el = inputRef.current;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const newValue = input.substring(0, start) + '\n' + input.substring(end);
+    setInput(newValue);
+    // Restore cursor position after newline
+    setTimeout(() => {
+      el.selectionStart = el.selectionEnd = start + 1;
+      // Trigger auto-resize
+      el.style.height = 'auto';
+      const sh = el.scrollHeight;
+      el.style.height = Math.min(sh, 200) + 'px';
+    }, 0);
+  };
+
+  // ── PASTE HANDLER ──
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const pastedText = e.clipboardData?.getData('text');
     if (pastedText && pastedText.length > 2000) {
@@ -195,65 +327,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     }
   };
 
-  const fetchSuggestions = async (dirPath: string, query: string, word: string) => {
-    setAutocompletePrefix(dirPath);
-    setAutocompleteQuery(query);
-    setLastWord(word);
-    
-    try {
-      if (api?.readDir) {
-        const results = await api.readDir(dirPath);
-        const filtered = results.filter((r: any) => r.name.toLowerCase().startsWith(query.toLowerCase()));
-        setSuggestions(filtered);
-        setSelectedSuggestionIndex(filtered.length > 0 ? 0 : -1);
-        setIsAutocompleteOpen(filtered.length > 0);
-      }
-    } catch (e) {
-      setIsAutocompleteOpen(false);
-    }
-  };
-
-  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setInput(val);
-    setHistoryIndex(-1);
-
-    const words = val.split(/\s+/);
-    const word = words[words.length - 1];
-    
-    const isPath = /^(?:[a-zA-Z]:[/\\]|[/\\]|\.[/\\]|\.\.[/\\]|~[/\\])/.test(word);
-    if (isPath) {
-      const lastSlashIndex = Math.max(word.lastIndexOf('/'), word.lastIndexOf('\\'));
-      if (lastSlashIndex !== -1) {
-        const dirPath = word.substring(0, lastSlashIndex + 1);
-        const query = word.substring(lastSlashIndex + 1);
-        fetchSuggestions(dirPath, query, word);
-      } else {
-        setIsAutocompleteOpen(false);
-      }
-    } else {
-      setIsAutocompleteOpen(false);
-    }
-
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      const sh = inputRef.current.scrollHeight;
-      inputRef.current.style.height = Math.min(sh, 96) + 'px';
-    }
-  };
-
-  const handleSelectSuggestion = (index: number) => {
-    const selected = suggestions[index];
-    if (selected) {
-      const newPath = autocompletePrefix + selected.name + (selected.isDir ? '/' : '');
-      const newInput = input.slice(0, -lastWord.length) + newPath;
-      setInput(newInput);
-      setIsAutocompleteOpen(false);
-      if (selected.isDir) fetchSuggestions(newPath, '', newPath);
-      inputRef.current?.focus();
-    }
-  };
-
+  // ── SUBMIT HANDLER ──
   const handleSubmit = () => {
     if (!input.trim() && !fileAttached) return;
 
@@ -278,14 +352,14 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     addToHistory(trimmed);
 
     const isExplicitOpen = trimmed.toLowerCase().startsWith('open ');
-    const isRawAbsolutePath = /^(?:[a-zA-Z]:[/\\]|[/\\])/.test(trimmed);
-    
+    const isRawAbsolutePath = /^(?:[a-zA-Z]:[/\\]|[/])/.test(trimmed);
+
     let targetPath = '';
     let shouldOpenLocally = false;
 
     if (isExplicitOpen) {
       const pathAfterOpen = trimmed.substring(5).trim();
-      const pathLooksLikeFile = /^(?:[a-zA-Z]:[/\\]|[/\\]|\.[/\\]|\.\.[/\\]|~[/\\])/.test(pathAfterOpen) || pathAfterOpen.includes('.mkv') || pathAfterOpen.includes('.mp4');
+      const pathLooksLikeFile = /^(?:[a-zA-Z]:[/\\]|[/]|\.[/\\]|\.\.[/\\]|~[/\\])/.test(pathAfterOpen) || pathAfterOpen.includes('.mkv') || pathAfterOpen.includes('.mp4');
       if (pathLooksLikeFile) {
         targetPath = pathAfterOpen;
         shouldOpenLocally = true;
@@ -300,7 +374,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     if (shouldOpenLocally) {
       if (targetPath.startsWith('"') && targetPath.endsWith('"')) targetPath = targetPath.slice(1, -1);
       if (targetPath.startsWith("'") && targetPath.endsWith("'")) targetPath = targetPath.slice(1, -1);
-      
+
       addMessage({
         id: generateId(),
         role: 'user',
@@ -313,7 +387,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         content: `Opening ${targetPath}...`,
         timestamp: Date.now(),
       });
-      
+
       api?.openPath?.(targetPath);
       setInput('');
       clearPendingAttachments();
@@ -340,7 +414,13 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     if (trimmed.startsWith('/undo')) {
       const parts = trimmed.split(' ');
       const turns = parts.length > 1 ? parseInt(parts[1], 10) : 1;
-      if (!isNaN(turns)) undo(turns);
+      const turnsToUndo = isNaN(turns) ? 1 : turns;
+      addMessage({
+        id: generateId(),
+        role: 'assistant',
+        content: `Undo requested (${turnsToUndo} turn${turnsToUndo > 1 ? 's' : ''}) — use the UI to undo messages.`,
+        timestamp: Date.now(),
+      });
       clearPendingAttachments();
       setInput('');
       resetTextarea();
@@ -409,14 +489,11 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     const docExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'rtf'];
 
     if (pendingAttachments.length > 0) {
-      // First image or document path for --image / file passthrough
       const firstPassthrough = pendingAttachments.find(
         f => f.isImage || docExts.includes(f.ext)
       );
       if (firstPassthrough) passthroughFilePath = firstPassthrough.path;
 
-      // Build XML context for plain-text/code files only
-      // Documents and images are binary — content must NOT go into CLI args
       const filesWithContent = pendingAttachments.filter(
         f => f.content !== null && !f.tooBig && !f.isImage && !docExts.includes(f.ext)
       );
@@ -425,7 +502,6 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
           .map(f => `<file name="${f.name}" path="${f.path}">\n${f.content}\n</file>`)
           .join('\n\n') + '\n\n';
       }
-      // Image + document reference tags (path only, no content)
       const binaryFiles = pendingAttachments.filter(
         f => f.isImage || docExts.includes(f.ext)
       );
@@ -460,7 +536,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
       isStreaming: true,
       tokens: 0,
       duration: 0,
-      mode: toolMode,
+      mode: 'thinking',
     });
 
     const state = useOverlayStore.getState();
@@ -479,6 +555,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     resetTextarea();
   };
 
+  // ── STOP HANDLER ──
   const handleStop = () => {
     api?.abortStream();
     setStreamState({ isStreaming: false });
@@ -489,12 +566,46 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     }));
   };
 
+  // ── BACKGROUND SEND HANDLER ──
+  const handleBackgroundSend = () => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+
+    addMessage({
+      id: generateId(),
+      role: 'user',
+      content: trimmed,
+      timestamp: Date.now(),
+    });
+
+    addMessage({
+      id: generateId(),
+      role: 'assistant',
+      content: '⏳ Running in background... You\'ll get a notification when it\'s done.',
+      timestamp: Date.now(),
+    });
+
+    const state = useOverlayStore.getState();
+    api?.dispatchBackground?.({
+      text: trimmed,
+      sessionId: undefined,
+      provider: state.activeProvider,
+      model: state.activeModel,
+    });
+
+    setInput('');
+    clearPendingAttachments();
+    resetTextarea();
+  };
+
+  // ── TOOLTIP HANDLER ──
   const showReject = (msg: string) => {
     setRejectTooltip(msg);
     if (rejectTimer.current) clearTimeout(rejectTimer.current);
     rejectTimer.current = setTimeout(() => setRejectTooltip(null), 2000);
   };
 
+  // ── ATTACH HANDLERS ──
   const handleAttachFile = async () => {
     setShowAttachMenu(false);
     try {
@@ -545,7 +656,6 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
         showReject('Clipboard is empty');
         return;
       }
-      // Attach clipboard text as a synthetic file
       const hash = text.substring(0, 40).replace(/[^a-zA-Z0-9]/g, '_') + '_clipboard';
       addPendingAttachments([{
         name: 'Clipboard.txt',
@@ -574,40 +684,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     }
   };
 
-  const handleBackgroundSend = () => {
-    const trimmed = input.trim();
-    if (!trimmed) return;
-
-    addMessage({
-      id: generateId(),
-      role: 'user',
-      content: trimmed,
-      timestamp: Date.now(),
-    });
-
-    addMessage({
-      id: generateId(),
-      role: 'assistant',
-      content: '⏳ Running in background... You\'ll get a notification when it\'s done.',
-      timestamp: Date.now(),
-    });
-
-    const state = useOverlayStore.getState();
-    api?.dispatchBackground?.({
-      text: trimmed,
-      sessionId: undefined, // fresh session for background tasks
-      provider: state.activeProvider,
-      model: state.activeModel,
-    });
-
-    setInput('');
-    clearPendingAttachments();
-    resetTextarea();
-  };
-
-  const hasContent = input.trim().length > 0 || pendingAttachments.length > 0;
-
-  // ── Context Capture handler ──
+  // ── CONTEXT CAPTURE HANDLER ──
   const handleCaptureContext = async () => {
     if (!api?.captureContext) return;
     try {
@@ -643,6 +720,11 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
     }
   };
 
+  const hasContent = input.trim().length > 0 || pendingAttachments.length > 0;
+  const isStreaming = streamState.isStreaming;
+  const sendBtnState = isStreaming ? 'streaming' : hasContent ? 'ready' : 'idle';
+
+  // ── RENDER ──
   return (
     <div className="input-bar">
       {rejectTooltip && (
@@ -661,17 +743,18 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
 
       {/* Center: Textarea + attachments */}
       <div className="input-content-col">
-        <AttachmentBar 
-          attachments={pendingAttachments} 
-          onRemove={removePendingAttachment} 
+        <AttachmentBar
+          attachments={pendingAttachments}
+          onRemove={removePendingAttachment}
         />
 
         <div style={{ position: 'relative', width: '100%' }}>
           {isAutocompleteOpen && (
-            <AutocompleteMenu 
+            <AutocompleteMenu
               suggestions={suggestions}
               selectedIndex={selectedSuggestionIndex}
               onSelect={handleSelectSuggestion}
+              type={autocompleteType}
             />
           )}
 
@@ -681,7 +764,7 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder="Message Hermes..."
+            placeholder="Message Hermes... (Enter to send, Shift+Enter for newline, Ctrl+Shift+Enter for background)"
             className="input-textarea"
             rows={1}
             aria-label="Message input"
@@ -714,14 +797,24 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
           <AudioLines size={16} strokeWidth={2} />
         </button>
 
-        {/* Background send moved to Ctrl+Enter */}
-  
+        {/* Background send button */}
+        <button
+          className="input-action-btn"
+          onClick={handleBackgroundSend}
+          disabled={!hasContent}
+          title="Send in background (Ctrl+Shift+Enter)"
+          aria-label="Background send"
+        >
+          <Zap size={16} strokeWidth={2} />
+        </button>
+
         {/* Stop streaming (conditional) */}
-        {streamState.isStreaming && (
+        {isStreaming && (
           <button
             className="input-action-btn stop"
             onClick={handleStop}
             aria-label="Stop streaming"
+            title="Stop (Escape)"
           >
             <Square size={14} fill="currentColor" />
           </button>
@@ -729,13 +822,17 @@ export const InputBar: React.FC<InputBarProps> = ({ inputRef }) => {
 
         {/* Send button */}
         <button
-          className={`send-btn ${hasContent ? 'ready' : 'idle'}`}
+          className={`send-btn ${sendBtnState}`}
           onClick={handleSubmit}
-          disabled={!hasContent}
-          title="Send (Enter) / Background (Ctrl+Enter)"
+          disabled={!hasContent || isStreaming}
+          title={isStreaming ? 'Streaming...' : 'Send (Enter)'}
           aria-label="Send message"
         >
-          <ArrowUp size={16} strokeWidth={2.5} />
+          {isStreaming ? (
+            <Square size={14} fill="currentColor" />
+          ) : (
+            <ArrowUp size={16} strokeWidth={2.5} />
+          )}
         </button>
       </div>
     </div>
