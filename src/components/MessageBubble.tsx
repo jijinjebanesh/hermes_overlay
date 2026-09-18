@@ -8,6 +8,7 @@ import { DiffBlock } from './message/DiffBlock';
 import { ToolActivityPill } from './message/ToolActivityPill';
 import { ThinkingBlock } from './message/ThinkingBlock';
 import { ToolCallBlock } from './message/ToolCallBlock';
+import { ClarifyBlock } from './message/ClarifyBlock';
 import { getElectronAPI } from '../hooks/useElectronAPI';
 
 const api = getElectronAPI();
@@ -26,10 +27,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
   const handleCopyText = () => {
     let textToCopy = message.content || '';
     if (!textToCopy && message.segments) {
-      const textSegments = message.segments.filter(s => s.type === 'text');
-      textToCopy = textSegments.map(s => s.content).join('\n\n');
+      const textSegments = message.segments.filter((s) => s.type === 'text');
+      textToCopy = textSegments.map((s) => s.content).join('\n\n');
     }
-
     navigator.clipboard.writeText(textToCopy).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -44,14 +44,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
       setIsReadingAloud(false);
       return;
     }
-
     let textToRead = message.content || '';
     if (!textToRead && message.segments) {
-      const textSegments = message.segments.filter(s => s.type === 'text');
-      textToRead = textSegments.map(s => s.content).join('\n\n');
+      const textSegments = message.segments.filter((s) => s.type === 'text');
+      textToRead = textSegments.map((s) => s.content).join('\n\n');
     }
     if (!textToRead.trim()) return;
-
     api?.synthesizeSpeech?.({ text: textToRead }).then((audioArray: number[]) => {
       if (!audioArray || audioArray.length === 0) return;
       const audioBuffer = new Uint8Array(audioArray).buffer;
@@ -81,9 +79,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
   };
 
   /**
-   * Live output arrives line-by-line; history usually arrives as one text segment.
-   * Buffer adjacent text segments so both paths are parsed as the same Markdown
-   * document—necessary for GFM constructs such as tables and nested lists.
+   * Render structured segments matching Hermes TUI terminal layout.
    */
   const renderStructuredSegments = () => {
     if (!message.segments) return null;
@@ -96,8 +92,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
       const content = textBuffer.join('\n').trim();
       if (content) {
         rendered.push(
-          <div key={`text-${textGroup++}`} className="message-assistant selectable">
-            <MarkdownContent content={content} />
+          <div key={`text-${textGroup++}`} className="hermes-terminal-panel selectable">
+            <div className="hermes-panel-header">
+              <span className="hermes-panel-corner">╭─</span>
+              <span className="hermes-panel-title">☤ Hermes</span>
+              <span className="hermes-panel-line" />
+              <span className="hermes-panel-corner">╮</span>
+            </div>
+            <div className="hermes-panel-content">
+              <MarkdownContent content={content} />
+            </div>
+            <div className="hermes-panel-footer">
+              <span className="hermes-panel-corner">╰</span>
+              <span className="hermes-panel-line" />
+              <span className="hermes-panel-corner">╯</span>
+            </div>
           </div>
         );
       }
@@ -110,18 +119,65 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
         return;
       }
 
+      // Non-text segment flushes accumulated text
       flushText();
+
       switch (seg.type) {
-        case 'tool_activity':
+        case 'tool_start':
+        case 'tool_complete':
           rendered.push(<ToolActivityPill key={`tool-${idx}`} segment={seg} />);
           break;
+
         case 'diff':
-          rendered.push(<DiffBlock key={`diff-${idx}`} content={seg.content} />);
+          rendered.push(<DiffBlock key={`diff-${idx}`} content={seg.content} diffLines={seg.diffLines} />);
           break;
+
+        case 'clarify':
+          rendered.push(
+            <ClarifyBlock
+              key={`clarify-${idx}`}
+              question={seg.question}
+              choices={seg.choices}
+              multiSelect={seg.multiSelect}
+              answer={seg.answer}
+            />
+          );
+          break;
+
+        case 'file_notice':
+          rendered.push(
+            <div key={`file-${idx}`} className="hermes-file-notice">
+              <span className="hermes-file-notice-icon">📄</span>
+              <span>Detected file: <strong>{seg.filename}</strong></span>
+            </div>
+          );
+          break;
+
         case 'thinking':
           rendered.push(<ThinkingBlock key={`thinking-${idx}`} content={seg.content} />);
           break;
-        // session_info is internal metadata and deliberately remains hidden.
+
+        case 'reasoning':
+          rendered.push(
+            <div key={`reasoning-${idx}`} className="hermes-reasoning-panel selectable">
+              <div className="hermes-reasoning-header">
+                <span className="hermes-reasoning-corner">┌─</span>
+                <span className="hermes-reasoning-title">Reasoning</span>
+                <span className="hermes-reasoning-line" />
+                <span className="hermes-reasoning-corner">┐</span>
+              </div>
+              <div className="hermes-reasoning-content">{seg.content}</div>
+              <div className="hermes-reasoning-footer">
+                <span className="hermes-reasoning-corner">└</span>
+                <span className="hermes-reasoning-line" />
+                <span className="hermes-reasoning-corner">┘</span>
+              </div>
+            </div>
+          );
+          break;
+
+        default:
+          break;
       }
     });
 
@@ -131,9 +187,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
 
   const renderMessageActions = () => (
     <div className="message-actions-toolbar">
-      <button 
-        className="message-action-btn" 
-        onClick={handleCopyText} 
+      <button
+        className="message-action-btn"
+        onClick={handleCopyText}
         title="Copy text"
       >
         {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -148,18 +204,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
         </button>
       )}
       {onEdit && message.role === 'user' && (
-        <button 
-          className="message-action-btn" 
-          onClick={onEdit} 
+        <button
+          className="message-action-btn"
+          onClick={onEdit}
           title="Edit message"
         >
           <Edit2 size={12} />
         </button>
       )}
       {onRetry && message.role === 'assistant' && (
-        <button 
-          className="message-action-btn" 
-          onClick={onRetry} 
+        <button
+          className="message-action-btn"
+          onClick={onRetry}
           title="Retry response"
         >
           <RotateCw size={12} />
@@ -171,35 +227,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
   // ── USER MESSAGE ──
   if (message.role === 'user') {
     return (
-      <div className="message-user-row message-row">
-        <div className="message-user-bubble selectable">
-          {message.attachments && message.attachments.length > 0 && (
-            <>
-              {/* Gallery for images when >1 image */}
-              {message.attachments.filter(f => f.isImage).length > 1 && (
-                <AttachmentGallery files={message.attachments} />
-              )}
-              {/* Chips for single images and all non-image files */}
-              {(message.attachments.filter(f => f.isImage).length <= 1 || message.attachments.some(f => !f.isImage)) && (
-                <div className="message-attachments">
-                  {message.attachments.map((file) => (
-                    <AttachmentChip key={file.id} file={file} variant="sent" />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-          {message.content}
-          
+      <div className="hermes-user-turn">
+        <div className="hermes-terminal-divider" />
+        <div className="hermes-user-bubble selectable">
+          <span className="hermes-user-bullet">●</span>
+          <div className="hermes-user-main">
+            {message.attachments && message.attachments.length > 0 && (
+              <>
+                {message.attachments.filter((f) => f.isImage).length > 1 && (
+                  <AttachmentGallery files={message.attachments} />
+                )}
+                {(message.attachments.filter((f) => f.isImage).length <= 1 ||
+                  message.attachments.some((f) => !f.isImage)) && (
+                  <div className="message-attachments">
+                    {message.attachments.map((file) => (
+                      <AttachmentChip key={file.id} file={file} variant="sent" />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+            <div className="hermes-user-text">{message.content}</div>
+          </div>
           <div className="message-actions-container">
             {renderMessageActions()}
           </div>
-        </div>
-        <div className="message-timestamp">
-          {new Date(message.timestamp).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
         </div>
       </div>
     );
@@ -209,14 +261,27 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
   const hasSegments = message.segments && message.segments.length > 0;
 
   return (
-    <div className="message-row" style={{ display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}>
+    <div className="hermes-assistant-turn" style={{ display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}>
       {/* Render structured segments if available */}
       {renderStructuredSegments()}
 
-      {/* Fallback: render plain content if no segments */}
+      {/* Fallback: render plain content inside authentic Hermes box */}
       {!hasSegments && message.content && (
-        <div className="message-assistant selectable">
-          <MarkdownContent content={message.content} />
+        <div className="hermes-terminal-panel selectable">
+          <div className="hermes-panel-header">
+            <span className="hermes-panel-corner">╭─</span>
+            <span className="hermes-panel-title">☤ Hermes</span>
+            <span className="hermes-panel-line" />
+            <span className="hermes-panel-corner">╮</span>
+          </div>
+          <div className="hermes-panel-content">
+            <MarkdownContent content={message.content} />
+          </div>
+          <div className="hermes-panel-footer">
+            <span className="hermes-panel-corner">╰</span>
+            <span className="hermes-panel-line" />
+            <span className="hermes-panel-corner">╯</span>
+          </div>
         </div>
       )}
 
@@ -227,7 +292,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
       {message.toolCalls && message.toolCalls.map((tool) => (
         <ToolCallBlock key={tool.id} tool={tool} />
       ))}
-      
+
       {!message.isStreaming && (
         <div className="message-actions-container-assistant">
           {renderMessageActions()}

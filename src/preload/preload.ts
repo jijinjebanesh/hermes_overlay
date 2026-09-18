@@ -1,16 +1,76 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { DiffLine } from '../tool-parser';
 
-/**
- * Typed IPC bridge — exposes only what the renderer needs.
- * No nodeIntegration. Context isolation enforced.
- */
+export type { DiffLine };
 
-export interface ParsedSegment {
-  type: 'tool_activity' | 'diff' | 'thinking' | 'text' | 'session_info';
-  content: string;
-  toolName?: string;
-  status?: string;
+// ── New typed segment types (replacing old ParsedSegment) ──
+
+export interface ToolStartSegment {
+  type: 'tool_start';
+  toolId: string;
+  name: string;
+  args: Record<string, any>;
+  display: string;
 }
+
+export interface ToolCompleteSegment {
+  type: 'tool_complete';
+  toolId: string;
+  name: string;
+  args: Record<string, any>;
+  result: any;
+  durationS?: number;
+  duration_s?: number;
+  inlineDiff?: string;
+  inline_diff?: string;
+  diffLines?: DiffLine[];
+  error?: string;
+  display: string;
+}
+
+export interface ClarifySegment {
+  type: 'clarify';
+  question: string;
+  choices?: string[];
+  multiSelect?: boolean;
+  answer?: string;
+}
+
+export interface FileNoticeSegment {
+  type: 'file_notice';
+  filename: string;
+}
+
+export interface ThinkingSegment {
+  type: 'thinking';
+  content: string;
+}
+
+export interface ReasoningSegment {
+  type: 'reasoning';
+  content: string;
+}
+
+export interface DiffSegment {
+  type: 'diff';
+  content: string;
+  diffLines?: DiffLine[];
+}
+
+export interface TextSegment {
+  type: 'text';
+  content: string;
+}
+
+export type StreamSegment =
+  | ToolStartSegment
+  | ToolCompleteSegment
+  | ClarifySegment
+  | FileNoticeSegment
+  | ThinkingSegment
+  | ReasoningSegment
+  | DiffSegment
+  | TextSegment;
 
 export interface InventoryPayload {
   providers: Array<{
@@ -104,7 +164,7 @@ export interface ElectronAPI {
   // Listeners (returns cleanup function)
   onVisibilityChange: (cb: (visible: boolean) => void) => () => void;
   onFocusInput: (cb: () => void) => () => void;
-  onStreamSegment: (cb: (segment: ParsedSegment) => void) => () => void;
+  onStreamSegment: (cb: (segment: StreamSegment) => void) => () => void;
   onStreamEnd: (cb: (result: { code: number | null }) => void) => () => void;
   onStreamError: (cb: (error: string) => void) => () => void;
   onEnterEchoMode: (cb: () => void) => () => void;
@@ -131,17 +191,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchSessions: (query: string) => ipcRenderer.invoke('search-sessions', query),
 
   // Background tasks
-  dispatchBackground: (data: { text: string; sessionId?: string; provider?: string; model?: string }) => ipcRenderer.invoke('dispatch-background', data),
+  dispatchBackground: (data: { text: string; sessionId?: string; provider?: string; model?: string }) =>
+    ipcRenderer.invoke('dispatch-background', data),
   listBackgroundTasks: () => ipcRenderer.invoke('list-background-tasks'),
   getBackgroundTask: (taskId: string) => ipcRenderer.invoke('get-background-task', taskId),
   clearBackgroundTask: (taskId: string) => ipcRenderer.invoke('clear-background-task', taskId),
 
   // Quick actions
-  quickActionExecute: (data: { action: string; text: string }) => ipcRenderer.invoke('quick-action-execute', data),
+  quickActionExecute: (data: { action: string; text: string }) =>
+    ipcRenderer.invoke('quick-action-execute', data),
   quickActionClose: () => ipcRenderer.send('quick-action-close'),
 
   // ── One-way sends ──
-  setProviderAndModel: (provider: string, model: string) => ipcRenderer.send('set-provider-model', provider, model),
+  setProviderAndModel: (provider: string, model: string) =>
+    ipcRenderer.send('set-provider-model', provider, model),
   saveSession: (data: { sessionId: string; markdown: string }) =>
     ipcRenderer.send('save-session', data),
   abortStream: () => ipcRenderer.send('abort-stream'),
@@ -149,11 +212,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openTerminal: () => ipcRenderer.send('open-terminal'),
   openPath: (path: string) => ipcRenderer.send('open-path', path),
   resetBounds: () => ipcRenderer.send('reset-bounds'),
-  setLaunchAtStartup: (enable: boolean) => ipcRenderer.send('set-launch-at-startup', enable),
-  setGlobalHotkey: (hotkey: string) => ipcRenderer.send('set-global-hotkey', hotkey),
-  setAlwaysOnTop: (enable: boolean) => ipcRenderer.send('set-always-on-top', enable),
+  setLaunchAtStartup: (enable: boolean) =>
+    ipcRenderer.send('set-launch-at-startup', enable),
+  setGlobalHotkey: (hotkey: string) =>
+    ipcRenderer.send('set-global-hotkey', hotkey),
+  setAlwaysOnTop: (enable: boolean) =>
+    ipcRenderer.send('set-always-on-top', enable),
 
-  setSmallWindow: (enable: boolean) => ipcRenderer.send('set-small-window', enable),
+  setSmallWindow: (enable: boolean) =>
+    ipcRenderer.send('set-small-window', enable),
   clearAllSessions: () => ipcRenderer.invoke('clear-all-sessions'),
   sendMessage: (data: {
     text: string;
@@ -166,10 +233,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendInput: (input: string) => ipcRenderer.send('send-input', input),
 
   // Echo Mode
-  transcribeAudio: (buffer: Uint8Array) => ipcRenderer.invoke('transcribe-audio', buffer),
-  synthesizeSpeech: (payload: { text: string, voice?: string, provider?: string }) => ipcRenderer.invoke('synthesize-speech', payload),
-  echoSendMessage: (payload: { text: string }) => ipcRenderer.invoke('echo-send-message', payload),
-  echoSettingsChanged: (settings: Record<string, any>) => ipcRenderer.send('echo-settings-changed', settings),
+  transcribeAudio: (buffer: Uint8Array) =>
+    ipcRenderer.invoke('transcribe-audio', buffer),
+  synthesizeSpeech: (payload: { text: string, voice?: string, provider?: string }) =>
+    ipcRenderer.invoke('synthesize-speech', payload),
+  echoSendMessage: (payload: { text: string }) =>
+    ipcRenderer.invoke('echo-send-message', payload),
+  echoSettingsChanged: (settings: Record<string, any>) =>
+    ipcRenderer.send('echo-settings-changed', settings),
   triggerEchoMode: () => ipcRenderer.send('trigger-echo-mode'),
   triggerWakeWord: () => ipcRenderer.send('trigger-wake-word'),
 
@@ -184,8 +255,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('focus-input', handler);
     return () => ipcRenderer.removeListener('focus-input', handler);
   },
-  onStreamSegment: (cb: (segment: ParsedSegment) => void) => {
-    const handler = (_e: any, seg: ParsedSegment) => cb(seg);
+  onStreamSegment: (cb: (segment: StreamSegment) => void) => {
+    const handler = (_e: any, seg: StreamSegment) => cb(seg);
     ipcRenderer.on('stream-segment', handler);
     return () => ipcRenderer.removeListener('stream-segment', handler);
   },

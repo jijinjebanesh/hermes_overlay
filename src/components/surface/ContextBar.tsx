@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MoreHorizontal, Plus, X, Settings, TerminalSquare, Zap, Maximize2, Minimize2 } from 'lucide-react';
 import { useOverlayStore } from '../../store/overlayStore';
 import { getElectronAPI } from '../../hooks/useElectronAPI';
@@ -26,114 +26,88 @@ export const ContextBar: React.FC<ContextBarProps> = ({
   const activeModel = useOverlayStore(s => s.activeModel);
   const activeProvider = useOverlayStore(s => s.activeProvider);
   const isStreaming = useOverlayStore(s => s.streamState.isStreaming);
-  const toolMode = useOverlayStore(s => s.toolMode);
   const setSettingsOpen = useOverlayStore(s => s.setSettingsOpen);
   const backgroundTasks = useOverlayStore(s => s.backgroundTasks);
   const smallWindow = useOverlayStore(s => s.smallWindow);
   const setSmallWindow = useOverlayStore(s => s.setSmallWindow);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const runningTasks = backgroundTasks.filter((t: any) => t.status === 'running');
   const hasRunning = runningTasks.length > 0;
 
-  // Format display model — shorten long names
-  const displayModel = React.useMemo(() => {
-    if (!activeModel) return 'No model';
-    const name = activeModel;
-    return name.length > 20 ? name.slice(0, 18) + '…' : name;
-  }, [activeModel]);
-
-  // Tool mode info
-  const toolModeInfo = React.useMemo(() => {
-    switch (toolMode) {
-      case 'all': return { label: 'Full tools', cls: 'all' };
-      case 'terminal': return { label: 'Terminal', cls: 'terminal' };
-      case 'none': return { label: 'Chat only', cls: 'none' };
-      default: return { label: 'Full tools', cls: 'all' };
-    }
-  }, [toolMode]);
-
   const handleClose = () => api?.closeOverlay();
   const handleTerminal = () => api?.openTerminal?.();
 
+  const summary = activeProvider && activeModel ? `${activeProvider} · ${activeModel}` : activeModel || 'No model';
+
   return (
-    <div className="context-bar">
+    <div className="context-bar context-bar--compact">
       <div className="context-bar-left">
-        {/* Model dot — clickable, opens command palette */}
         <button
           className="model-dot"
-          onClick={onMoreClick}
-          title={`${activeProvider} · ${activeModel}`}
+          onClick={() => setSettingsOpen(true)}
+          title={summary}
         >
           <span className={`model-dot-indicator ${isStreaming ? 'streaming' : ''}`} />
-          <span>{displayModel}</span>
-          {isStreaming && (
-            <span className="streaming-dots">
-              <span />
-              <span />
-              <span />
+          <span>{activeModel || 'No model'}</span>
+          {hasRunning && (
+            <span className="bg-task-indicator" title={`${runningTasks.length} task(s) running`}>
+              <Zap size={10} />
+              <span>{runningTasks.length}</span>
             </span>
           )}
         </button>
-
-        {/* Background tasks indicator */}
-        {hasRunning && (
-          <div className="bg-task-indicator" title={`${runningTasks.length} task(s) running`}>
-            <Zap size={11} />
-            <span>{runningTasks.length}</span>
-          </div>
-        )}
       </div>
 
-      <div className="context-bar-right">
-        {showNewButton && (
-          <button
-            className="context-bar-more"
-            onClick={onNewSession}
-            title="New session (Ctrl+N)"
-          >
-            <Plus />
-          </button>
-        )}
-
+      <div
+        className="context-bar-overflow"
+        onMouseEnter={() => setIsMenuOpen(true)}
+        onMouseLeave={() => setIsMenuOpen(false)}
+        onFocus={() => setIsMenuOpen(true)}
+        onBlur={() => setIsMenuOpen(false)}
+      >
         <button
-          className="context-bar-more"
-          onClick={handleTerminal}
-          title="Open Terminal"
-        >
-          <TerminalSquare />
-        </button>
-
-        <button
-          className="context-bar-more"
-          onClick={() => setSmallWindow(!smallWindow)}
-          title={smallWindow ? "Normal View" : "Compact View"}
-        >
-          {smallWindow ? <Maximize2 /> : <Minimize2 />}
-        </button>
-
-        <button
-          className="context-bar-more"
-          onClick={() => setSettingsOpen(true)}
-          title="Settings (Ctrl+,)"
-        >
-          <Settings />
-        </button>
-
-        <button
-          className="context-bar-more"
-          onClick={onMoreClick}
-          title="Command Palette (Ctrl+K)"
+          className="context-bar-more context-bar-more--overflow"
+          onClick={() => setIsMenuOpen((open) => !open)}
+          title="More actions"
+          aria-label="More actions"
         >
           <MoreHorizontal />
         </button>
 
-        <button
-          className="context-bar-more"
-          onClick={handleClose}
-          title="Close (Esc)"
-        >
-          <X />
-        </button>
+        <div className={`context-bar-menu ${isMenuOpen ? 'is-open' : ''}`}>
+          {showNewButton && (
+            <button onClick={onNewSession}>
+              <Plus size={14} />
+              <span>New chat</span>
+            </button>
+          )}
+
+          <button onClick={handleTerminal}>
+            <TerminalSquare size={14} />
+            <span>Terminal</span>
+          </button>
+
+          <button onClick={() => setSmallWindow(!smallWindow)}>
+            {smallWindow ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
+            <span>{smallWindow ? 'Normal view' : 'Compact view'}</span>
+          </button>
+
+          <button onClick={() => setSettingsOpen(true)}>
+            <Settings size={14} />
+            <span>Settings</span>
+          </button>
+
+          <button onClick={onMoreClick}>
+            <Zap size={14} />
+            <span>Command palette</span>
+          </button>
+
+          <button onClick={handleClose} className="context-bar-menu-item--danger">
+            <X size={14} />
+            <span>Close</span>
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -8,25 +8,14 @@ import { CommandPalette } from '../components/command/CommandPalette';
 import { SettingsPanel } from '../components/settings/SettingsPanel';
 import { GuideModal } from '../components/GuideModal';
 import { useOverlayStore, generateId } from '../store/overlayStore';
-import type { StreamSegment } from '../store/overlayStore';
+import type { StreamSegment, ToolStartSegment, ToolCompleteSegment } from '../store/overlayStore';
 import { EchoMode } from '../components/EchoMode';
 import type { EchoSessionTurn } from '../hooks/useEchoSession';
 import { WakeWordListener } from '../components/WakeWordListener';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { ToastContainer } from '../components/ui/Toast';
+import { SessionHistorySidebar } from '../components/header/SessionHistorySidebar';
 import { getElectronAPI } from '../hooks/useElectronAPI';
-
-/**
- * App — Root component and surface state machine.
- *
- * Surface states:
- *   - query:        Minimal mode, no chrome above input
- *   - conversation: Context bar + messages + input
- *   - workspace:    Full chrome with tabs and tool panels
- *
- * Preserves all IPC listeners, drag/drop, echo mode, and
- * keyboard shortcuts from the original architecture.
- */
 
 const api = getElectronAPI();
 
@@ -61,11 +50,13 @@ export const App: React.FC = () => {
   const [echoTransitioning, setEchoTransitioning] = useState(false);
   const echoStartTimeRef = useRef<number>(0);
 
+  // Track open tool starts for lifecycle pairing (tool_start → tool_complete)
+  const openToolIdsRef = useRef<Set<string>>(new Set());
+
   // ── Command Palette state ──
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
 
   // ── Surface state derivation ──
-  // Surface morphs based on content, not explicit mode switching
   const surfaceState = React.useMemo(() => {
     if (messages.length === 0) return 'query';
     if (messages.length > 6) return 'workspace';
@@ -74,23 +65,16 @@ export const App: React.FC = () => {
 
   // ── Theme & Font Engine ──
   useEffect(() => {
-    // Font Family
     if (fontFamily) {
       document.documentElement.style.setProperty('--font-sans', fontFamily);
     }
-
-    // Accent Color — set data attribute for CSS-driven theming
     if (accentColor) {
       document.documentElement.setAttribute('data-accent', accentColor);
     }
-
-    // Theme logic
     const safeTheme = theme || 'system';
-    
     const applyTheme = (isDark: boolean) => {
       document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
     };
-
     if (safeTheme === 'system') {
       const mq = window.matchMedia('(prefers-color-scheme: dark)');
       applyTheme(mq.matches);
@@ -134,21 +118,18 @@ export const App: React.FC = () => {
 
     const cleanups: (() => void)[] = [];
 
-    // Visibility changes — sync state and focus
+    // Visibility changes
     if (api.onVisibilityChange) {
       cleanups.push(api.onVisibilityChange((visible: boolean) => {
         setIsVisible(visible);
         if (visible) {
           focusInput();
-
-          // ── Auto-Context Capture ──
           const state = useOverlayStore.getState();
           if (state.autoCaptureContext && api.captureContext) {
             setTimeout(async () => {
               try {
                 const ctx = await api.captureContext!();
                 if (!ctx) return;
-
                 if (ctx.clipboardText) {
                   useOverlayStore.getState().addPendingAttachments([{
                     id: generateId(),
@@ -161,7 +142,6 @@ export const App: React.FC = () => {
                     isImage: false,
                   }]);
                 }
-
                 if (ctx.screenshot) {
                   const fileResult = await api.readDroppedFile(ctx.screenshot.path);
                   if (fileResult) {
@@ -189,28 +169,64 @@ export const App: React.FC = () => {
       cleanups.push(api.onFocusInput(() => focusInput()));
     }
 
-    // Structured stream segments
+    // ── Structured stream segments (TUI-style) ──
     if (api.onStreamSegment) {
       cleanups.push(api.onStreamSegment((segment: StreamSegment) => {
+        // Handle tool lifecycle: tool_start opens, tool_complete closes
+        if (segment.type === 'tool_start') {
+          openToolIdsRef.current.add(segment.toolId);
+          // Tool start is a transient event — we track it in store for pairing
+          // but the display is handled by the tool_complete rendering
+        } else if (segment.type === 'tool_complete') {
+          openToolIdsRef.current.delete(segment.toolId);
+        }
+
         appendSegmentToLast(segment);
-        setStreamState({
-          isStreaming: true,
-          tokens: useOverlayStore.getState().streamState.tokens + 1,
-        });
+
+        // Only set streaming true for content segments (not tool lifecycle markers)
+        if (segment.type === 'text' || segment.type === 'thinking' ||
+            segment.type === 'reasoning' || segment.type === 'diff' ||
+            segment.type === 'tool_complete' || segment.type === 'clarify') {
+          setStreamState({
+            isStreaming: true,
+            tokens: useOverlayStore.getState().streamState.tokens + 1,
+          });
+        }
       }));
     }
 
     // Stream end
     if (api.onStreamEnd) {
-      cleanups.push(api.onStreamEnd(() => {
+      cleanups.push(api.onStreamEnd((result: { code: number | null }) => {
+        openToolIdsRef.current.clear();
         setStreamState({ isStreaming: false, tokens: 0, duration: 0 });
-        updateLastMessage((msg) => ({ ...msg, isStreaming: false }));
+        updateLastMessage((msg) => {
+          const updatedSegments = msg.segments?.map((seg) => {
+            if (seg.type === 'tool_start') {
+              return {
+                type: 'tool_complete' as const,
+                toolId: seg.toolId,
+                name: seg.name,
+                args: seg.args,
+                result: '',
+                display: seg.display,
+              };
+            }
+            return seg;
+          });
+          return {
+            ...msg,
+            segments: updatedSegments || msg.segments,
+            isStreaming: false,
+          };
+        });
       }));
     }
 
     // Stream error
     if (api.onStreamError) {
       cleanups.push(api.onStreamError((error: string) => {
+        openToolIdsRef.current.clear();
         setStreamState({ isStreaming: false });
         const isENOENT = error.includes('ENOENT') || error.includes('spawn hermes');
         const friendly = isENOENT
@@ -274,26 +290,19 @@ export const App: React.FC = () => {
   // ── Keyboard Shortcuts ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Ctrl+K — Command Palette
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.shiftKey) {
         e.preventDefault();
         setIsPaletteOpen(prev => !prev);
       }
-
-      // Ctrl+, — Settings
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
         setSettingsOpen(!isSettingsOpen);
       }
-
-      // Ctrl+N — New Session
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !e.shiftKey) {
         e.preventDefault();
         newSession();
         focusInput();
       }
-
-      // Ctrl+Shift+E — Echo Mode
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'e') {
         e.preventDefault();
         if (isEchoMode) {
@@ -303,8 +312,6 @@ export const App: React.FC = () => {
           enterEchoMode();
         }
       }
-      
-      // Ctrl+T — Cycle Tool Mode
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't' && !e.shiftKey) {
         e.preventDefault();
         cycleToolMode();
@@ -318,14 +325,12 @@ export const App: React.FC = () => {
   useEffect(() => {
     const state = useOverlayStore.getState();
     if (!state.streamState.isStreaming) return;
-
     const interval = setInterval(() => {
       const s = useOverlayStore.getState().streamState;
       if (s.isStreaming) {
         setStreamState({ duration: s.duration + 1 });
       }
     }, 1000);
-
     return () => clearInterval(interval);
   }, []);
 
@@ -389,10 +394,8 @@ export const App: React.FC = () => {
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
       const isSupported = supportedExts.includes(ext) || file.type !== '';
       if (!isSupported) return null;
-
       const filePath = (file as any).path || '';
       if (!filePath || !api) return null;
-
       try {
         const result = await api.readDroppedFile(filePath);
         return { ...result, id: generateId() };
@@ -404,7 +407,7 @@ export const App: React.FC = () => {
 
     const results = await Promise.all(readPromises);
     const validFiles = results.filter((f): f is any => f !== null && !f.error);
-    
+
     if (validFiles.length > 0) {
       useOverlayStore.getState().addPendingAttachments(validFiles);
     }
@@ -425,18 +428,15 @@ export const App: React.FC = () => {
       setEchoTransitioning(false);
       focusInput();
     }, 300);
-
     if (sessionTranscript && sessionTranscript.length > 0) {
       const durationSec = Math.floor((Date.now() - echoStartTimeRef.current) / 1000);
       const mins = Math.floor(durationSec / 60);
       const secs = durationSec % 60;
       const durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
       const exchanges = Math.floor(sessionTranscript.length / 2);
-
       const transcriptLines = sessionTranscript.map(t =>
         `**${t.role === 'user' ? 'You' : 'Hermes'}:** ${t.text}`
       ).join('\n\n');
-
       addMessage({
         id: generateId(),
         role: 'assistant',
@@ -446,7 +446,7 @@ export const App: React.FC = () => {
     }
   }, [addMessage, focusInput]);
 
-  // ── Session switching (for Command Palette) ──
+  // ── Session switching ──
   const handleSwitchSession = useCallback(async (sessionId: string) => {
     if (!api?.getSession) return;
     try {
@@ -459,7 +459,6 @@ export const App: React.FC = () => {
     }
   }, [hydrateSession]);
 
-  // Show ContextBar in conversation and workspace states
   const showContextBar = surfaceState !== 'query';
   const showDragOverlay = isDragging;
 
@@ -473,7 +472,7 @@ export const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <ToastContainer>
-        <div 
+        <div
           className={shellClasses}
           data-surface={surfaceState}
           onDragEnter={handleDragEnter}
@@ -484,7 +483,6 @@ export const App: React.FC = () => {
             ...(echoTransitioning ? { pointerEvents: 'none' as const } : {}),
           }}
         >
-          {/* Drag overlay */}
           {showDragOverlay && (
             <div className="drag-overlay">
               <div className="drag-overlay-content">
@@ -494,23 +492,20 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {/* Context Bar — always present, replaces old Header */}
+          <SessionHistorySidebar />
+
           <ContextBar
             onMoreClick={() => setIsPaletteOpen(true)}
             onNewSession={() => { newSession(); focusInput(); }}
             showNewButton={true}
           />
 
-          {/* Conversation */}
           <Conversation />
 
-          {/* Input */}
           <InputBar inputRef={inputRef} />
 
-          {/* Status Bar — conditional */}
           <StatusBar />
 
-          {/* Command Palette (Ctrl+K) — inside shell for containment */}
           <CommandPalette
             isOpen={isPaletteOpen}
             onClose={() => setIsPaletteOpen(false)}
@@ -520,22 +515,18 @@ export const App: React.FC = () => {
             onEnterEchoMode={enterEchoMode}
           />
 
-          {/* Settings Panel (Ctrl+,) — inside shell for containment */}
           <SettingsPanel
             isOpen={isSettingsOpen}
             onClose={() => setSettingsOpen(false)}
           />
 
-          {/* Guide Modal — inside shell for containment */}
           <GuideModal />
         </div>
 
-        {/* Echo Mode Layer — fixed fullscreen, outside shell */}
         {isEchoMode && (
           <EchoMode onExit={handleEchoExit} />
         )}
 
-        {/* Global Wake Word Listener */}
         <WakeWordListener />
       </ToastContainer>
     </ErrorBoundary>

@@ -6,6 +6,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #NoTrayIcon
+#UseHook true
 Persistent
 
 overlayDir := "C:\Users\jijin\hermes-overlay"
@@ -35,7 +36,9 @@ getToken() {
     return ""
 }
 
-f4:: {
+f4::
+f7::
+f9:: {
     global windowVisible
     
     hwnd := WinExist(overlayTitle)
@@ -94,7 +97,9 @@ f4:: {
     }
 }
 
-^+f4:: {
+^+f4::
+^+f7::
+^+f9:: {
     try {
         ProcessClose("electron.exe")
     }

@@ -1,72 +1,111 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, FolderOpen, Globe2, PenLine, Search, Terminal, Wrench } from 'lucide-react';
-import { StreamSegment } from '../../store/overlayStore';
-import { CodeBlock } from './CodeBlock';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import { DiffBlock } from './DiffBlock';
+import {
+  ToolCompleteSegment,
+  ToolStartSegment,
+  ToolCompleteDisplay,
+  formatToolCompleteForDisplay,
+  formatToolStartForDisplay,
+} from './toolDisplay';
 
-interface ToolActivityPillProps {
-  segment: StreamSegment;
+interface ToolPillProps {
+  segment: ToolStartSegment | ToolCompleteSegment;
+  isStart?: boolean;
 }
 
-const getToolVisual = (content: string) => {
-  const value = content.toLowerCase();
-  if (value.includes('terminal') || value.includes('bash') || value.includes('shell')) return { Icon: Terminal, verb: 'Ran a command' };
-  if (value.includes('write') || value.includes('edit') || value.includes('patch')) return { Icon: PenLine, verb: 'Updated a file' };
-  if (value.includes('search') || value.includes('find') || value.includes('grep')) return { Icon: Search, verb: 'Searched project files' };
-  if (value.includes('web') || value.includes('browse') || value.includes('url') || value.includes('http')) return { Icon: Globe2, verb: 'Looked something up' };
-  if (value.includes('read') || value.includes('file') || value.includes('dir')) return { Icon: FolderOpen, verb: 'Read a file' };
-  return { Icon: Wrench, verb: 'Used a tool' };
-};
-
-const formatLabel = (content: string) => {
-  const label = content
-    .replace(/^[│┊]\s*/gm, '')
-    .replace(/(?:💻|✍️|🔍|📁|🌐|⚡|🔧|📝|🛠️|⚙️|🔒)\s*/g, '')
-    .replace(/\s+·\s+\{[\s\S]*$/, '')
-    .replace(/…$/, '')
-    .replace(/^preparing\s+/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return label.length > 112 ? `${label.slice(0, 109)}…` : label || 'Tool activity';
-};
-
-export const ToolActivityPill: React.FC<ToolActivityPillProps> = ({ segment }) => {
+const ToolPill: React.FC<ToolPillProps> = ({ segment, isStart = false }) => {
   const [expanded, setExpanded] = useState(false);
-  const { Icon, verb } = getToolVisual(segment.content);
-  const label = formatLabel(segment.content);
-  const hasDetail = segment.content.trim().length > label.length || segment.content.includes('\n');
+  const display = isStart
+    ? formatToolStartForDisplay(segment as ToolStartSegment)
+    : formatToolCompleteForDisplay(segment as ToolCompleteSegment);
+
+  const diffText = (segment as ToolCompleteSegment).inlineDiff || (segment as ToolCompleteSegment).inline_diff;
+  const diffLines = (segment as ToolCompleteSegment).diffLines;
+  const hasDetail = !isStart && !!(diffText || (diffLines && diffLines.length > 0));
+
+  if (isStart) {
+    return (
+      <div className="hermes-tool-line hermes-tool-line--start">
+        <span className="hermes-tool-tree">┊</span>
+        <span className="hermes-tool-emoji">{display.emoji}</span>
+        <span className="hermes-tool-verb">preparing</span>
+        <span className="hermes-tool-name">{display.detail || segment.name}…</span>
+        <span className="hermes-tool-pulse" />
+      </div>
+    );
+  }
+
+  const isError = !!(segment as ToolCompleteSegment).error;
+  const completeDisplay = display as ToolCompleteDisplay;
 
   return (
-    <div className="tool-call-card">
-      <button
-        type="button"
-        className="tool-call-pill tool-call-pill--pending"
-        onClick={() => hasDetail && setExpanded((value) => !value)}
-        aria-expanded={hasDetail ? expanded : undefined}
-        aria-label={`${expanded ? 'Hide' : 'Show'} details for ${verb}`}
-      >
-        <span className="tool-call-icon"><Icon size={14} strokeWidth={2.1} /></span>
-        <span className="tool-call-copy">
-          <span className="tool-call-verb">{verb}</span>
-          <span className="tool-call-summary">{label}</span>
-        </span>
-        {hasDetail && <ChevronDown className={`tool-call-chevron${expanded ? ' is-expanded' : ''}`} size={14} />}
-      </button>
+    <div className={`hermes-tool-wrapper ${isError ? 'has-error' : ''}`}>
+      <div className="hermes-tool-line hermes-tool-line--complete">
+        <span className="hermes-tool-tree">┊</span>
+        <span className="hermes-tool-emoji">{completeDisplay.emoji}</span>
+        <span className="hermes-tool-verb">{completeDisplay.verb}</span>
+        <span className="hermes-tool-detail">{completeDisplay.detail}</span>
+        {completeDisplay.duration != null && (
+          <span className="hermes-tool-duration">{completeDisplay.duration.toFixed(1)}s</span>
+        )}
+        {completeDisplay.error && (
+          <span className="hermes-tool-error-tag">[{completeDisplay.error}]</span>
+        )}
+        {hasDetail && (
+          <button
+            type="button"
+            className="hermes-tool-diff-toggle"
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? 'Collapse diff' : 'Review diff'}
+          >
+            {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            <span>review diff</span>
+          </button>
+        )}
+      </div>
 
       <AnimatePresence initial={false}>
         {expanded && hasDetail && (
           <motion.div
-            className="tool-call-detail"
-            initial={{ height: 0, opacity: 0, y: -4 }}
-            animate={{ height: 'auto', opacity: 1, y: 0 }}
-            exit={{ height: 0, opacity: 0, y: -4 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="hermes-tool-diff-container"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
           >
-            <CodeBlock code={segment.content} language="text" />
+            <DiffBlock content={diffText || ''} diffLines={diffLines} />
           </motion.div>
         )}
       </AnimatePresence>
     </div>
   );
+};
+
+export const ToolActivityPill: React.FC<{ segment: any }> = ({ segment }) => {
+  if (!segment) return null;
+
+  if (segment.type === 'tool_start') {
+    return <ToolPill segment={segment} isStart={true} />;
+  }
+
+  if (segment.type === 'tool_complete') {
+    return <ToolPill segment={segment} isStart={false} />;
+  }
+
+  if (segment.type === 'diff' && (segment.content || segment.diffLines)) {
+    return <DiffBlock content={segment.content || ''} diffLines={segment.diffLines} />;
+  }
+
+  if (segment.content) {
+    return (
+      <div className="hermes-tool-line">
+        <span className="hermes-tool-tree">┊</span>
+        <span className="hermes-tool-detail">{segment.content}</span>
+      </div>
+    );
+  }
+
+  return null;
 };

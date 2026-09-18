@@ -1,6 +1,9 @@
 /**
  * Hermes CLI — Spawning hermes.exe, parsing streaming output,
  * and managing the active child process.
+ *
+ * Uses tool-parser.ts for structured tool lifecycle parsing
+ * (tool_start / tool_complete / thinking / reasoning / diff).
  */
 
 import { spawn, ChildProcess } from 'child_process';
@@ -10,7 +13,19 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
+import {
+  parseHermesOutput,
+  ParseState,
+  formatToolStartEvt,
+  formatToolCompleteEvt,
+  render_inline_diff,
+  DiffLine,
+  ToolStartEvent,
+  ToolCompleteEvent,
+} from '../tool-parser';
+
 let activeChild: ChildProcess | null = null;
+let wasAborted = false;
 const sessionMap = new Map<string, string>();
 
 const sessionMapPath = path.join(os.homedir(), '.hermes', 'overlay_session_map.json');
@@ -23,7 +38,7 @@ function loadSessionMap() {
         sessionMap.set(key, value as string);
       }
     }
-  } catch (e) {
+  } catch {
     // Ignore — fresh start is fine
   }
 }
@@ -34,20 +49,17 @@ function saveSessionMap() {
     for (const [key, value] of sessionMap.entries()) {
       obj[key] = value;
     }
-    // Keep at most 100 entries to avoid unbounded growth
     const entries = Object.entries(obj);
     if (entries.length > 100) {
       entries.slice(0, 100).forEach(([k, v]) => { obj[k] = v; });
-      // Remove excess keys from obj
       entries.slice(100).forEach(([k]) => { delete obj[k]; });
     }
     fs.writeFileSync(sessionMapPath, JSON.stringify(obj, null, 2), 'utf-8');
-  } catch (e) {
-    // Ignore — persistence is best-effort
+  } catch {
+    // Persistence is best-effort
   }
 }
 
-// Load persisted session map on module init
 loadSessionMap();
 
 export function getActiveChild(): ChildProcess | null {
@@ -55,6 +67,7 @@ export function getActiveChild(): ChildProcess | null {
 }
 
 export function killActiveChild() {
+  wasAborted = true;
   if (activeChild && !activeChild.killed) {
     activeChild.kill('SIGTERM');
     activeChild = null;
@@ -67,11 +80,75 @@ export function sendInputToChild(input: string) {
   }
 }
 
-/**
- * Send a message via hermes CLI with streaming output parsing.
- * Parses structured segments (tool activity, diffs, thinking, text)
- * and sends them to the renderer in real time.
- */
+// ── Re-typed IPC segment events (structured, TUI-style) ──
+
+export interface StreamToolStart {
+  type: 'tool_start';
+  toolId: string;
+  name: string;
+  args: Record<string, any>;
+  display: string;
+}
+
+export interface StreamToolComplete {
+  type: 'tool_complete';
+  toolId: string;
+  name: string;
+  args: Record<string, any>;
+  result: any;
+  durationS?: number;
+  duration_s?: number;
+  inlineDiff?: string;
+  inline_diff?: string;
+  diffLines?: DiffLine[];
+  error?: string;
+  display: string;
+}
+
+export interface StreamClarify {
+  type: 'clarify';
+  question: string;
+  choices?: string[];
+  multiSelect?: boolean;
+  answer?: string;
+}
+
+export interface StreamFileNotice {
+  type: 'file_notice';
+  filename: string;
+}
+
+export interface StreamThinking {
+  type: 'thinking';
+  content: string;
+}
+
+export interface StreamReasoning {
+  type: 'reasoning';
+  content: string;
+}
+
+export interface StreamDiff {
+  type: 'diff';
+  content: string;
+  diffLines?: DiffLine[];
+}
+
+export interface StreamText {
+  type: 'text';
+  content: string;
+}
+
+export type StreamSegmentEvent =
+  | StreamToolStart
+  | StreamToolComplete
+  | StreamClarify
+  | StreamFileNotice
+  | StreamThinking
+  | StreamReasoning
+  | StreamDiff
+  | StreamText;
+
 export function sendMessage(
   mainWindow: BrowserWindow,
   data: {
@@ -83,6 +160,10 @@ export function sendMessage(
     model?: string;
   }
 ) {
+  const emitSegment = (seg: StreamSegmentEvent) => {
+    mainWindow?.webContents.send('stream-segment', seg);
+  };
+
   const args: string[] = [];
   const hermesSessionId = sessionMap.get(data.sessionId);
 
@@ -92,47 +173,53 @@ export function sendMessage(
 
   args.push('chat');
 
-  // Get model/provider from saved config or from data
   const config = loadOverlayConfig();
   const provider = data.provider || config.activeProvider;
   const model = data.model || config.activeModel;
   if (provider) args.push('--provider', provider);
   if (model) args.push('--model', model);
 
-  // Tool mode
   if (data.toolMode === 'none') args.push('-t', '');
   else if (data.toolMode === 'terminal') args.push('-t', 'terminal');
 
   let queryText = data.text;
-    if (data.file) {
-      const ext = data.file.split('.').pop()?.toLowerCase() || '';
-      const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
-      const docExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'rtf'];
+  if (data.file) {
+    const ext = data.file.split('.').pop()?.toLowerCase() || '';
+    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+    const docExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'rtf'];
 
-      if (imageExts.includes(ext)) {
-        args.push('--image', data.file);
-      } else if (docExts.includes(ext)) {
-        // Pass document path inline so hermes can read it
-        queryText = `[User attached a file: ${data.file}]\n\n` + queryText;
-      } else {
-        queryText = `[User attached a file at: ${data.file}]\n\n` + queryText;
-      }
+    if (imageExts.includes(ext)) {
+      args.push('--image', data.file);
+    } else if (docExts.includes(ext)) {
+      queryText = `[User attached a file: ${data.file}]\n\n` + queryText;
+    } else {
+      queryText = `[User attached a file at: ${data.file}]\n\n` + queryText;
     }
+  }
 
   args.push('-q', queryText);
   args.push('--accept-hooks');
 
+  // Parser states
+  const toolParseState: ParseState = {
+    toolStartStack: [],
+    diffBuffer: '',
+    inDiff: false,
+  };
+
+  let inResponseBox = false;
+  let inReasoningBox = false;
+  let inThinkingBox = false;
+
   let fullOutput = '';
   let parsedIndex = 0;
-  let inBox = false;
-  let inDiff = false;
-
-  let diffBuffer = '';
-  let isThinkingBox = false;
-  let toolBuffer = '';
-  let toolBufferToolName = '';
 
   try {
+    if (activeChild && !activeChild.killed) {
+      killActiveChild();
+    }
+    wasAborted = false;
+
     const isWindows = process.platform === 'win32';
     activeChild = spawn(isWindows ? 'hermes.exe' : 'hermes', args, {
       shell: false,
@@ -142,11 +229,74 @@ export function sendMessage(
         FORCE_COLOR: '0',
         NO_COLOR: '1',
         TERM: 'dumb',
+        HERMES_OVERLAY: '1',
       },
     });
 
+    const emitToolStart = (evt: ToolStartEvent) => {
+      // If a previous tool was still in flight, it completed before this one started
+      while (toolParseState.toolStartStack.length > 0) {
+        const prev = toolParseState.toolStartStack.pop();
+        if (prev) {
+          emitToolComplete({
+            type: 'tool_complete',
+            toolId: prev.toolId,
+            name: prev.name,
+            args: prev.args,
+            result: '',
+            error: undefined,
+          });
+        }
+      }
+      toolParseState.toolStartStack.push(evt);
+      emitSegment({
+        type: 'tool_start',
+        toolId: evt.toolId,
+        name: evt.name,
+        args: evt.args,
+        display: formatToolStartEvt(evt),
+      });
+    };
+
+    const emitToolComplete = (evt: ToolCompleteEvent) => {
+      const diffText = evt.inline_diff || evt.inlineDiff;
+      const diffLines = evt.diffLines || (diffText ? render_inline_diff(diffText) : undefined);
+      const dur = evt.duration_s ?? evt.durationS;
+      emitSegment({
+        type: 'tool_complete',
+        toolId: evt.toolId,
+        name: evt.name,
+        args: evt.args,
+        result: evt.result,
+        durationS: dur,
+        duration_s: dur,
+        inlineDiff: diffText,
+        inline_diff: diffText,
+        diffLines,
+        error: evt.error,
+        display: formatToolCompleteEvt(evt),
+      });
+    };
+
+    const flushCompletedTools = () => {
+      while (toolParseState.toolStartStack.length > 0) {
+        const last = toolParseState.toolStartStack.pop();
+        if (last) {
+          emitToolComplete({
+            type: 'tool_complete',
+            toolId: last.toolId,
+            name: last.name,
+            args: last.args,
+            result: '',
+            error: undefined,
+          });
+        }
+      }
+    };
+
     const handleChunk = (chunk: Buffer) => {
       const text = chunk.toString();
+      // Strip ANSI escape codes
       const cleanText = text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
       fullOutput += cleanText;
 
@@ -162,152 +312,105 @@ export function sendMessage(
       let unparsed = fullOutput.substring(parsedIndex);
       let lineEnd = unparsed.indexOf('\n');
 
-      while (lineEnd !== -1 || inBox) {
-        if (inBox) {
-          const endBoxIndex = unparsed.indexOf('╰─');
-          if (endBoxIndex !== -1) {
-            const content = unparsed.substring(0, endBoxIndex);
-            if (content) {
-              mainWindow?.webContents.send('stream-segment', {
-                type: isThinkingBox ? 'thinking' : 'text',
-                content: content.replace(/^    /gm, ''),
-              });
-            }
-            inBox = false;
-            const lineEndAfterBox = unparsed.indexOf('\n', endBoxIndex);
-            parsedIndex += (lineEndAfterBox !== -1 ? lineEndAfterBox + 1 : unparsed.length);
-            unparsed = fullOutput.substring(parsedIndex);
-            lineEnd = unparsed.indexOf('\n');
+      while (lineEnd !== -1) {
+        const line = unparsed.substring(0, lineEnd);
+        const trimmed = line.trim();
+        parsedIndex += lineEnd + 1;
+
+        // 1. Inside assistant response box
+        if (inResponseBox) {
+          const isBoxEnd =
+            trimmed.startsWith('╰') ||
+            trimmed.startsWith('└') ||
+            (trimmed.length > 5 && /^─+$/.test(trimmed.replace(/\s+/g, '')));
+
+          if (isBoxEnd) {
+            inResponseBox = false;
           } else {
-            if (unparsed) {
-              mainWindow?.webContents.send('stream-segment', {
-                type: isThinkingBox ? 'thinking' : 'text',
-                content: unparsed.replace(/^    /gm, ''),
-              });
-              parsedIndex += unparsed.length;
-              unparsed = '';
-            }
-            break;
+            emitSegment({ type: 'text', content: line });
           }
-        } else {
-          if (lineEnd === -1) break;
-          const line = unparsed.substring(0, lineEnd);
-          const trimmed = line.trim();
-          parsedIndex += lineEnd + 1;
-
-          // Skip metadata lines
-          if (
-            trimmed.startsWith('Query:') ||
-            trimmed.startsWith('Initializing agent') ||
-            trimmed.match(/^─+$/) ||
-            trimmed.startsWith('Resume this session with:') ||
-            trimmed.startsWith('hermes --resume') ||
-            trimmed.startsWith('Session:') ||
-            trimmed.startsWith('Duration:') ||
-            trimmed.startsWith('Messages:') ||
-            trimmed.startsWith('Exit code:') ||
-            trimmed.startsWith('↻') ||
-            trimmed.match(/Resumed session/)
-          ) {
-            unparsed = fullOutput.substring(parsedIndex);
-            lineEnd = unparsed.indexOf('\n');
-            continue;
-          }
-
-          if (inDiff) {
-            if (trimmed.startsWith('╭─') || (trimmed === '' && diffBuffer.length > 0)) {
-              mainWindow?.webContents.send('stream-segment', { type: 'diff', content: diffBuffer.trim() });
-              inDiff = false;
-              diffBuffer = '';
-            } else {
-              diffBuffer += line + '\n';
-              unparsed = fullOutput.substring(parsedIndex);
-              lineEnd = unparsed.indexOf('\n');
-              continue;
-            }
-          }
-
-          if (trimmed.startsWith('╭─')) {
-            inBox = true;
-            const title = trimmed.toLowerCase();
-            isThinkingBox = title.includes('thinking') || title.includes('reasoning');
-          } else if (trimmed.match(/^─+\s+⚕ Hermes/)) {
-            inBox = true;
-            isThinkingBox = false;
-          } else if (trimmed.startsWith('┊') || trimmed.match(/^[│┊]\s/)) {
-            const toolMatch = trimmed.match(/[│┊]\s*(?:💻|✍️|🔍|📁|🌐|⚡|🔧|📝|🛠️|⚙️|🔒)\s*(?:preparing\s+)?(.+?)…?$/);
-            if (toolMatch) {
-              // Start of a new tool activity — flush previous buffer if any
-              if (toolBuffer) {
-                const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
-                mainWindow?.webContents.send('stream-segment', {
-                  type: 'tool_activity',
-                  content: contentText,
-                  toolName: toolBufferToolName || undefined,
-                });
-              }
-              let contentText = trimmed.replace(/^[│┊]\s*/, '');
-              contentText = contentText.replace(/\s+·\s+\{[\s\S]*$/, '').trim();
-              toolBuffer = trimmed;
-              toolBufferToolName = toolMatch[1].trim().replace(/…$/, '');
-            } else if (trimmed.includes('review diff')) {
-              // Flush tool buffer before switching to diff
-              if (toolBuffer) {
-                const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
-                mainWindow?.webContents.send('stream-segment', {
-                  type: 'tool_activity',
-                  content: contentText,
-                  toolName: toolBufferToolName || undefined,
-                });
-                toolBuffer = '';
-                toolBufferToolName = '';
-              }
-              inDiff = true;
-              diffBuffer = '';
-            } else {
-              // Continuation of tool output — add to buffer
-              if (toolBuffer) {
-                toolBuffer += '\n' + trimmed;
-              } else {
-                let contentText = trimmed.replace(/^[│┊]\s*/, '');
-                contentText = contentText.replace(/\s+·\s+\{[\s\S]*$/, '').trim();
-                toolBuffer = trimmed;
-                toolBufferToolName = '';
-              }
-            }
-          } else if (trimmed) {
-            // Non-tool, non-box line — flush tool buffer
-            if (toolBuffer) {
-              const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
-              mainWindow?.webContents.send('stream-segment', {
-                type: 'tool_activity',
-                content: contentText,
-                toolName: toolBufferToolName || undefined,
-              });
-              toolBuffer = '';
-              toolBufferToolName = '';
-            }
-            mainWindow?.webContents.send('stream-segment', {
-              type: 'text',
-              content: line.replace(/^    /gm, ''),
-            });
-          } else {
-            // Empty line — flush tool buffer
-            if (toolBuffer) {
-              const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
-              mainWindow?.webContents.send('stream-segment', {
-                type: 'tool_activity',
-                content: contentText,
-                toolName: toolBufferToolName || undefined,
-              });
-              toolBuffer = '';
-              toolBufferToolName = '';
-            }
-          }
-
-          unparsed = fullOutput.substring(parsedIndex);
-          lineEnd = unparsed.indexOf('\n');
         }
+        // 2. Inside reasoning box
+        else if (inReasoningBox) {
+          const isBoxEnd =
+            trimmed.startsWith('╰') ||
+            trimmed.startsWith('└') ||
+            (trimmed.length > 5 && /^─+$/.test(trimmed.replace(/\s+/g, '')));
+
+          if (isBoxEnd) {
+            inReasoningBox = false;
+          } else {
+            emitSegment({ type: 'reasoning', content: line });
+          }
+        }
+        // 3. Inside thinking box
+        else if (inThinkingBox) {
+          const isBoxEnd =
+            trimmed.startsWith('╰') ||
+            trimmed.startsWith('└') ||
+            (trimmed.length > 5 && /^─+$/.test(trimmed.replace(/\s+/g, '')));
+
+          if (isBoxEnd) {
+            inThinkingBox = false;
+          } else {
+            emitSegment({ type: 'thinking', content: line });
+          }
+        }
+        // 4. Box start detection (supports rounded ╭─, flat ─ ☤ Hermes ─, and standard borders)
+        else if (
+          trimmed.includes('☤ Hermes') ||
+          (trimmed.includes('Hermes') && (trimmed.startsWith('╭') || trimmed.startsWith('┌') || trimmed.startsWith('─')))
+        ) {
+          flushCompletedTools();
+          if (trimmed.toLowerCase().includes('thinking')) {
+            inThinkingBox = true;
+          } else if (trimmed.toLowerCase().includes('reasoning')) {
+            inReasoningBox = true;
+          } else {
+            inResponseBox = true;
+          }
+        } else if (trimmed.startsWith('┌─') && trimmed.toLowerCase().includes('reasoning')) {
+          flushCompletedTools();
+          inReasoningBox = true;
+        } else {
+          // 5. Parse tool events, diffs, clarify, notices
+          const toolEvents = parseHermesOutput(line + '\n', toolParseState);
+          for (const evt of toolEvents) {
+            if (evt.type === 'tool_start') {
+              emitToolStart(evt);
+            } else if (evt.type === 'tool_complete') {
+              emitToolComplete(evt);
+            } else if (evt.type === 'diff') {
+              emitSegment({
+                type: 'diff',
+                content: evt.content,
+                diffLines: evt.diffLines,
+              });
+            } else if (evt.type === 'clarify') {
+              toolParseState.toolStartStack = toolParseState.toolStartStack.filter(
+                (s) => s.name !== 'clarify'
+              );
+              emitSegment({
+                type: 'clarify',
+                question: evt.question,
+                choices: evt.choices,
+                multiSelect: evt.multiSelect,
+                answer: evt.answer,
+              });
+            } else if (evt.type === 'file_notice') {
+              emitSegment({
+                type: 'file_notice',
+                filename: evt.filename,
+              });
+            }
+          }
+
+          // 6. Outside of boxes: do NOT emit metadata/session/CLI summary as chat text.
+          // Hermes output outside boxes is CLI chrome (e.g. "Resume this session with:", "Title: ...", etc.)
+        }
+
+        unparsed = fullOutput.substring(parsedIndex);
+        lineEnd = unparsed.indexOf('\n');
       }
     };
 
@@ -315,18 +418,32 @@ export function sendMessage(
     activeChild.stderr?.on('data', handleChunk);
 
     activeChild.on('close', (code) => {
-      if (inDiff && diffBuffer.trim()) {
-        mainWindow?.webContents.send('stream-segment', { type: 'diff', content: diffBuffer.trim() });
-      }
-      // Flush any remaining tool buffer
-      if (toolBuffer) {
-        const contentText = toolBuffer.replace(/[│┊]\s*/gm, '').replace(/\s+·\s+\{[\s\S]*$/g, '').trim();
-        mainWindow?.webContents.send('stream-segment', {
-          type: 'tool_activity',
-          content: contentText,
-          toolName: toolBufferToolName || undefined,
+      // Flush any remaining diff
+      if (toolParseState.inDiff && toolParseState.diffBuffer.trim()) {
+        const diffText = toolParseState.diffBuffer.trim();
+        emitSegment({
+          type: 'diff',
+          content: diffText,
+          diffLines: render_inline_diff(diffText),
         });
       }
+
+      // Close any open tool cleanly if normal completion, or interrupted if aborted/failed
+      const isError = wasAborted || (code !== 0 && code !== null);
+      while (toolParseState.toolStartStack.length > 0) {
+        const last = toolParseState.toolStartStack.pop();
+        if (last) {
+          emitToolComplete({
+            type: 'tool_complete',
+            toolId: last.toolId,
+            name: last.name,
+            args: last.args,
+            result: '',
+            error: isError ? (wasAborted ? 'interrupted' : 'error') : undefined,
+          });
+        }
+      }
+
       mainWindow?.webContents.send('stream-end', { code });
       activeChild = null;
     });

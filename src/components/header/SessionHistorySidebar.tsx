@@ -68,7 +68,7 @@ const getSessionTitle = (session: SessionRecord) => {
 
 export const SessionHistorySidebar: React.FC = () => {
   const { hydrateSession, newSession, sessionId } = useOverlayStore();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isClearing, setIsClearing] = useState(false);

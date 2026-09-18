@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, RotateCw, Trash2, Keyboard, HelpCircle } from 'lucide-react';
 import { useOverlayStore } from '../../store/overlayStore';
+import { ProviderSettings } from './ProviderSettings';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -309,6 +310,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
           <div className="settings-section">
             <div className="settings-section-title">AI Engine</div>
             <div className="settings-card">
+              <ProviderSettings />
               <div className="settings-row">
                 <div>
                   <div className="settings-row-label">Default tool mode</div>

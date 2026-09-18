@@ -16,13 +16,76 @@ export interface ToolCall {
   status: 'pending' | 'success' | 'error';
 }
 
-/** Structured segment from hermes CLI output */
-export interface StreamSegment {
-  type: 'tool_activity' | 'diff' | 'thinking' | 'text' | 'session_info';
-  content: string;
-  toolName?: string;
-  status?: string;
+// ── New TUI-style segment types (replacing old flat tool_activity) ──
+
+import type { DiffLine } from '../tool-parser';
+
+export interface ToolStartSegment {
+  type: 'tool_start';
+  toolId: string;
+  name: string;
+  args: Record<string, any>;
+  display: string;
 }
+
+export interface ToolCompleteSegment {
+  type: 'tool_complete';
+  toolId: string;
+  name: string;
+  args: Record<string, any>;
+  result: any;
+  durationS?: number;
+  duration_s?: number;
+  inlineDiff?: string;
+  inline_diff?: string;
+  diffLines?: DiffLine[];
+  error?: string;
+  display: string;
+}
+
+export interface ClarifySegment {
+  type: 'clarify';
+  question: string;
+  choices?: string[];
+  multiSelect?: boolean;
+  answer?: string;
+}
+
+export interface FileNoticeSegment {
+  type: 'file_notice';
+  filename: string;
+}
+
+export interface ThinkingSegment {
+  type: 'thinking';
+  content: string;
+}
+
+export interface ReasoningSegment {
+  type: 'reasoning';
+  content: string;
+}
+
+export interface DiffSegment {
+  type: 'diff';
+  content: string;
+  diffLines?: DiffLine[];
+}
+
+export interface TextSegment {
+  type: 'text';
+  content: string;
+}
+
+export type StreamSegment =
+  | ToolStartSegment
+  | ToolCompleteSegment
+  | ClarifySegment
+  | FileNoticeSegment
+  | ThinkingSegment
+  | ReasoningSegment
+  | DiffSegment
+  | TextSegment;
 
 export interface AttachedFile {
   id: string;
@@ -43,7 +106,7 @@ export interface Message {
   isStreaming?: boolean;
   cancelled?: boolean;
   toolCalls?: ToolCall[];
-  /** Structured segments from hermes output (tool activity, diffs, thinking, text) */
+  /** Structured segments from hermes output (TUI-style tool lifecycle, diffs, thinking, text) */
   segments?: StreamSegment[];
   attachments?: AttachedFile[];
   blocks?: SemanticBlock[];
@@ -106,7 +169,6 @@ interface OverlayState {
   launchAtStartup: boolean;
   globalHotkey: string;
   alwaysOnTop: boolean;
-
   smallWindow: boolean;
   theme: 'system' | 'light' | 'dark';
   accentColor: string;
@@ -227,7 +289,7 @@ export const useOverlayStore = create<OverlayState>()(
 
       // Settings
       isSettingsOpen: false,
-      settingsSidebarCollapsed: true, // Default to collapsed for more content space
+      settingsSidebarCollapsed: true,
       isGuideOpen: false,
       launchAtStartup: false,
       globalHotkey: 'CommandOrControl+Alt+H',
@@ -298,7 +360,54 @@ export const useOverlayStore = create<OverlayState>()(
           const last = { ...msgs[msgs.length - 1] };
           if (last.role !== 'assistant') return state;
 
-          const segments = [...(last.segments || []), segment];
+          let segments = [...(last.segments || [])];
+
+          // When a clarify segment arrives, remove any pending tool_start for clarify
+          // so the clarify card cleanly replaces the tool pill
+          if (segment.type === 'clarify') {
+            const toolIdx = segments.findIndex(
+              (s) => (s.type === 'tool_start' || s.type === 'tool_complete') && (s as any).name === 'clarify'
+            );
+            if (toolIdx !== -1) {
+              segments.splice(toolIdx, 1);
+            }
+
+            const existingIdx = segments.findIndex(
+              (s) => s.type === 'clarify' && (s as ClarifySegment).question === segment.question
+            );
+            if (existingIdx !== -1) {
+              segments[existingIdx] = {
+                ...(segments[existingIdx] as ClarifySegment),
+                ...segment,
+                choices: segment.choices && segment.choices.length > 0 ? segment.choices : (segments[existingIdx] as ClarifySegment).choices,
+              };
+            } else {
+              segments.push(segment);
+            }
+          } else if (segment.type === 'tool_complete') {
+            // Drop tool_complete for clarify if a clarify segment already exists
+            if (segment.name === 'clarify' && segments.some((s) => s.type === 'clarify')) {
+              return state;
+            }
+            let startIdx = -1;
+            if (segment.toolId) {
+              startIdx = segments.findIndex(
+                (s) => s.type === 'tool_start' && (s as ToolStartSegment).toolId === segment.toolId
+              );
+            }
+            if (startIdx === -1 && segment.name) {
+              startIdx = segments.findIndex(
+                (s) => s.type === 'tool_start' && (s as ToolStartSegment).name === segment.name
+              );
+            }
+            if (startIdx !== -1) {
+              segments[startIdx] = segment;
+            } else {
+              segments.push(segment);
+            }
+          } else {
+            segments.push(segment);
+          }
 
           // Also update the text content for text segments
           if (segment.type === 'text') {
@@ -329,12 +438,10 @@ export const useOverlayStore = create<OverlayState>()(
         if (idx === -1) return null;
         const msg = state.messages[idx];
         if (msg.role !== 'assistant') return null;
-        // Find the preceding user message
         let userContent: string | null = null;
         for (let i = idx - 1; i >= 0; i--) {
           if (state.messages[i].role === 'user') {
             userContent = state.messages[i].content;
-            // Remove everything from the user message onward
             set({ messages: state.messages.slice(0, i) });
             break;
           }
@@ -423,31 +530,24 @@ export const useOverlayStore = create<OverlayState>()(
         set({ echoVoiceModeEnabled: enabled });
         window.electronAPI?.echoSettingsChanged?.({ echoVoiceModeEnabled: enabled });
       },
-
       setEchoClapSensitivity: (sensitivity) => {
         set({ echoClapSensitivity: sensitivity });
         window.electronAPI?.echoSettingsChanged?.({ echoClapSensitivity: sensitivity });
       },
-
       setEchoTtsProvider: (provider) => set({ echoTtsProvider: provider }),
-
       setEchoTtsVoice: (voice) => set({ echoTtsVoice: voice }),
-
       setEchoWakeWordEnabled: (enabled) => {
         set({ echoWakeWordEnabled: enabled });
         window.electronAPI?.echoSettingsChanged?.({ echoWakeWordEnabled: enabled });
       },
-
       setEchoWakeWord: (word) => {
         set({ echoWakeWord: word });
         window.electronAPI?.echoSettingsChanged?.({ echoWakeWord: word });
       },
-
       setEchoDoubleClapMinimize: (enabled) => {
         set({ echoDoubleClapMinimize: enabled });
         window.electronAPI?.echoSettingsChanged?.({ echoDoubleClapMinimize: enabled });
       },
-
       setAutoCaptureContext: (enabled) => set({ autoCaptureContext: enabled }),
       setAutoCaptureScreenshot: (enabled) => set({ autoCaptureScreenshot: enabled }),
       setBackgroundTasks: (tasks) => set({ backgroundTasks: tasks }),
