@@ -701,6 +701,45 @@ select:focus-visible {
   max-height: 380px;
 }
 
+.overlay-shell.small-mode .settings-sidebar {
+  width: 120px;
+  min-width: 120px;
+}
+
+.overlay-shell.small-mode .settings-sidebar-title {
+  display: none;
+}
+
+.overlay-shell.small-mode .settings-sidebar-item-label {
+  display: none;
+}
+
+.overlay-shell.small-mode .settings-content-header {
+  padding: var(--space-1) var(--space-2);
+}
+
+.overlay-shell.small-mode .settings-content-title {
+  font-size: var(--text-base);
+}
+
+.overlay-shell.small-mode .settings-vscode-card {
+  padding: var(--space-1-5);
+}
+
+.overlay-shell.small-mode .ps-grid {
+  flex-direction: column;
+}
+
+.overlay-shell.small-mode .ps-panel.ps-providers {
+  max-height: 120px;
+  border-right: none;
+  border-bottom: 1px solid var(--border-secondary);
+}
+
+.overlay-shell.small-mode .ps-panel.ps-models {
+  max-height: 200px;
+}
+
 /* ── Drag overlay ── */
 .drag-overlay {
   position: absolute;
