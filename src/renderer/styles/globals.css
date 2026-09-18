@@ -6385,6 +6385,34 @@ select:focus-visible {
   color: var(--text-primary);
 }
 
+.hermes-clarify-choice.submitted {
+  background: var(--accent-muted);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hermes-clarify-choice.submitted .hermes-clarify-choice-icon {
+  color: var(--accent);
+}
+
+.hermes-clarify-choice-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  flex-shrink: 0;
+  animation: check-pop 0.2s var(--ease-bouncy) both;
+}
+
+@keyframes check-pop {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+
 .hermes-clarify-choice-icon {
   color: var(--accent);
   flex-shrink: 0;

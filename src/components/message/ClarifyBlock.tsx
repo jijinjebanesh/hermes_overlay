@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HelpCircle, ArrowRight, CornerDownRight, Send } from 'lucide-react';
+import { HelpCircle, ArrowRight, CornerDownRight, Send, Check } from 'lucide-react';
 
 interface ClarifyBlockProps {
   question: string;
@@ -11,8 +11,14 @@ interface ClarifyBlockProps {
 
 export const ClarifyBlock: React.FC<ClarifyBlockProps> = ({ question, answer, choices, onAnswer }) => {
   const [textAnswer, setTextAnswer] = useState('');
+  const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
   const hasChoices = choices && choices.length > 0;
   const hasAnswer = !!answer;
+
+  const handleChoiceClick = (choice: string) => {
+    setSelectedChoice(choice);
+    onAnswer?.(choice);
+  };
 
   const handleSubmitText = () => {
     if (textAnswer.trim() && onAnswer) {
@@ -44,11 +50,17 @@ export const ClarifyBlock: React.FC<ClarifyBlockProps> = ({ question, answer, ch
             {choices!.map((choice, idx) => (
               <button
                 key={idx}
-                className="hermes-clarify-choice"
-                onClick={() => onAnswer?.(choice)}
+                className={`hermes-clarify-choice${selectedChoice === choice ? ' submitted' : ''}`}
+                onClick={() => handleChoiceClick(choice)}
+                disabled={selectedChoice !== null}
               >
                 <CornerDownRight size={12} className="hermes-clarify-choice-icon" />
                 <span>{choice}</span>
+                {selectedChoice === choice && (
+                  <span className="hermes-clarify-choice-check">
+                    <Check size={12} />
+                  </span>
+                )}
               </button>
             ))}
           </div>
