@@ -324,8 +324,13 @@ export const useOverlayStore = create<OverlayState>()(
       newSession: () =>
         set({ messages: [], sessionId: generateId() }),
 
-      hydrateSession: (sessionId, messages) =>
-        set({ sessionId, messages }),
+      hydrateSession: (sessionId, messages) => {
+        // Generate a new overlay session ID and register the mapping
+        // so that --resume is passed to Hermes CLI
+        const newOverlayId = generateId();
+        window.electronAPI?.registerSessionMapping(newOverlayId, sessionId);
+        set({ sessionId: newOverlayId, messages });
+      },
 
       setStreamState: (newState) =>
         set((state) => ({

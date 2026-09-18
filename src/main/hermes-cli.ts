@@ -74,6 +74,11 @@ export function killActiveChild() {
   }
 }
 
+export function registerSessionMapping(overlaySessionId: string, hermesSessionId: string) {
+  sessionMap.set(overlaySessionId, hermesSessionId);
+  saveSessionMap();
+}
+
 export function sendInputToChild(input: string) {
   if (activeChild && !activeChild.killed && activeChild.stdin) {
     activeChild.stdin.write(input);

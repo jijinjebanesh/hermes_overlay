@@ -10,7 +10,7 @@ import os from 'os';
 import { spawn, execSync } from 'child_process';
 import { loadOverlayConfig, saveOverlayConfig, sessionsDir } from './config';
 import { getMainWindow, toggleVisibility, getIsVisible } from './window';
-import { sendMessage, killActiveChild, sendInputToChild } from './hermes-cli';
+import { sendMessage, killActiveChild, sendInputToChild, registerSessionMapping } from './hermes-cli';
 import { transcribeViaDaemon, isWhisperDaemonReady } from './whisper-daemon';
 
 // ── Background Task Tracker ──
@@ -149,6 +149,10 @@ export function registerIpcHandlers() {
   ipcMain.on('save-session', (_e, data: { sessionId: string; markdown: string }) => {
     const savePath = path.join(sessionsDir, `${data.sessionId}.md`);
     fs.writeFileSync(savePath, data.markdown);
+  });
+
+  ipcMain.on('register-session-mapping', (_e, overlaySessionId: string, hermesSessionId: string) => {
+    registerSessionMapping(overlaySessionId, hermesSessionId);
   });
 
   ipcMain.handle('clear-all-sessions', async () => {

@@ -132,6 +132,7 @@ export interface ElectronAPI {
   // One-way sends
   setProviderAndModel: (provider: string, model: string) => void;
   saveSession: (data: { sessionId: string; markdown: string }) => void;
+  registerSessionMapping: (overlaySessionId: string, hermesSessionId: string) => void;
   abortStream: () => void;
   closeOverlay: () => void;
   openTerminal: () => void;
@@ -207,6 +208,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('set-provider-model', provider, model),
   saveSession: (data: { sessionId: string; markdown: string }) =>
     ipcRenderer.send('save-session', data),
+  registerSessionMapping: (overlaySessionId: string, hermesSessionId: string) =>
+    ipcRenderer.send('register-session-mapping', overlaySessionId, hermesSessionId),
   abortStream: () => ipcRenderer.send('abort-stream'),
   closeOverlay: () => ipcRenderer.send('close-overlay'),
   openTerminal: () => ipcRenderer.send('open-terminal'),
